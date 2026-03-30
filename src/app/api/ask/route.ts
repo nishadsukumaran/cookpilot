@@ -1,0 +1,455 @@
+import { NextResponse } from "next/server";
+import { detectIntent, intentToRescueProblem } from "@/lib/hybrid/intent";
+import { getRescue } from "@/lib/engines/rescue";
+import { findSubstitutesFor } from "@/lib/engines/substitution";
+import { planCalorieReduction, estimateCalories } from "@/lib/engines/transformation";
+import { getRecipeById } from "@/data/mock-data";
+import { ai } from "@/lib/ai";
+import { logRescueQuery, logAiInteraction } from "@/lib/db/queries";
+import type { HybridResponse } from "@/lib/hybrid/types";
+import type { RescueQueryResponse } from "@/lib/db/schema";
+import { createTrace, isDev } from "@/lib/debug/types";
+import type { DebugTrace } from "@/lib/debug/types";
+
+interface AskRequest {
+  message: string;
+  context?: {
+    recipeName?: string;
+    cuisine?: string;
+    currentStep?: number;
+    recipeId?: string;
+    sessionId?: string;
+  };
+}
+
+export async function POST(req: Request) {
+  const body: AskRequest = await req.json();
+  const { message, context } = body;
+
+  if (!message?.trim()) {
+    return NextResponse.json({ error: "Message is required" }, { status: 400 });
+  }
+
+  const trace = createTrace();
+
+  // ─── Intent Detection ─────────────────────────────
+  const intentStart = Date.now();
+  const intent = detectIntent(message);
+  trace.addStage("intent", `Detected: ${intent.category}/${intent.subcategory ?? "none"}`, Date.now() - intentStart, {
+    category: intent.category,
+    subcategory: intent.subcategory ?? null,
+    confidence: intent.confidence,
+    entities: JSON.stringify(intent.entities),
+  });
+
+  let response: HybridResponse;
+  let debugTrace: DebugTrace | undefined;
+
+  switch (intent.category) {
+    case "rescue":
+      ({ response, trace: debugTrace } = await handleRescue(intent, message, context, trace));
+      break;
+    case "substitution":
+      ({ response, trace: debugTrace } = await handleSubstitution(intent, message, context, trace));
+      break;
+    case "modification":
+      ({ response, trace: debugTrace } = await handleModification(intent, message, context, trace));
+      break;
+    default:
+      ({ response, trace: debugTrace } = await handleGeneral(message, context, trace));
+      break;
+  }
+
+  // Attach trace only in dev
+  const payload = isDev() ? { ...response, _trace: debugTrace } : response;
+  return NextResponse.json(payload);
+}
+
+// ─── Rescue Flow ────────────────────────────────────
+
+async function handleRescue(
+  intent: ReturnType<typeof detectIntent>,
+  message: string,
+  context: AskRequest["context"],
+  trace: ReturnType<typeof createTrace>
+): Promise<{ response: HybridResponse; trace: DebugTrace }> {
+  const problem = intentToRescueProblem(intent);
+
+  // Structured knowledge lookup
+  const knowledgeStart = Date.now();
+  const rescue = problem ? getRescue(problem) : null;
+  const hadStructured = rescue?.found ?? false;
+  trace.addStage("knowledge", hadStructured ? `Matched: ${problem}` : "No structured match", Date.now() - knowledgeStart, {
+    problem: problem ?? "none",
+    matched: hadStructured,
+    structured_fix_used: hadStructured,
+    urgency: rescue?.urgency ?? "n/a",
+  });
+
+  if (!hadStructured) trace.addFlag("no-structured-match");
+
+  // AI enrichment — explains the structured fix, cannot replace it
+  const aiStart = Date.now();
+  const aiResult = await ai.rescueAdvice({
+    problem: message,
+    recipeName: context?.recipeName,
+    cuisine: context?.cuisine,
+    currentStep: context?.currentStep,
+    structuredFix: rescue?.solution?.immediateFix.instruction,
+  });
+  trace.addStage("ai-enrichment", `Task: rescue-advice`, Date.now() - aiStart, {
+    model: aiResult.model,
+    latencyMs: aiResult.latencyMs,
+    wasMock: aiResult.wasMock,
+    responseLength: aiResult.content.length,
+    ai_enrichment_used: true,
+    ai_allowed_to_change_primary_fix: false,
+  });
+
+  if (aiResult.wasMock) trace.addFlag("ai-mock-response");
+
+  // DB logging (fire-and-forget)
+  logAiInteraction({
+    taskType: "rescue-advice",
+    model: aiResult.model,
+    inputSummary: message,
+    inputContext: { recipeName: context?.recipeName, problem: problem ?? message },
+    outputScenarioType: "rescue",
+    latencyMs: aiResult.latencyMs,
+    wasMock: aiResult.wasMock,
+  }).catch(() => {});
+
+  let response: HybridResponse;
+
+  if (rescue?.found && rescue.solution) {
+    const sol = rescue.solution;
+    response = {
+      type: "rescue",
+      fix: {
+        title: `Fix: ${sol.label}`,
+        instruction: sol.immediateFix.instruction,
+        ingredients: sol.immediateFix.ingredients,
+        urgency: rescue.urgency === "high" ? "immediate" : "when-ready",
+        duration: sol.immediateFix.duration,
+      },
+      alternatives: [{
+        title: "Gradual Recovery",
+        instruction: sol.gradualFix.instruction,
+        ingredients: sol.gradualFix.ingredients,
+        tradeoff: sol.gradualFix.duration ? `Takes ${sol.gradualFix.duration}` : "Takes longer but more thorough",
+      }],
+      impact: {
+        taste: { direction: "better", description: "Following these fixes should restore the balance" },
+        texture: { direction: "neutral", description: "No significant texture change expected" },
+        authenticity: { direction: "neutral", description: "Standard cooking corrections" },
+      },
+      explanation: aiResult.content,
+      proTip: sol.preventionTip,
+      source: {
+        structured: true,
+        ai: true,
+        confidence: intent.confidence >= 0.7 ? "high" : "medium",
+      },
+    };
+  } else {
+    response = {
+      type: "rescue",
+      fix: { title: "CookPilot's Advice", instruction: aiResult.content, urgency: "when-ready" },
+      alternatives: [],
+      impact: {
+        taste: { direction: "neutral", description: "Depends on the specific situation" },
+        texture: { direction: "neutral", description: "Depends on the specific situation" },
+        authenticity: { direction: "neutral", description: "Depends on the specific situation" },
+      },
+      explanation: aiResult.content,
+      proTip: "When in doubt, make small adjustments and taste between each one.",
+      source: { structured: false, ai: true, confidence: "low" },
+    };
+  }
+
+  // Log rescue query
+  const dbResponse: RescueQueryResponse = {
+    fix: response.fix,
+    alternatives: response.alternatives,
+    impact: response.impact,
+    confidence: response.source.confidence,
+    tiersUsed: 1,
+    guardrailApplied: false,
+  };
+  logRescueQuery({
+    userInput: message,
+    detectedIntent: { category: intent.category, subcategory: intent.subcategory, confidence: intent.confidence },
+    problemType: problem ?? undefined,
+    hadStructured,
+    response: dbResponse,
+    sessionId: context?.sessionId,
+    recipeId: context?.recipeId,
+  }).catch(() => {});
+
+  trace.addStage("logging", "Logged to rescue_queries + ai_interactions", 0, { hadStructured });
+
+  return {
+    response,
+    trace: trace.finish({ structured: hadStructured, ai: true, mock: aiResult.wasMock }),
+  };
+}
+
+// ─── Substitution Flow ──────────────────────────────
+
+async function handleSubstitution(
+  intent: ReturnType<typeof detectIntent>,
+  message: string,
+  context: AskRequest["context"],
+  trace: ReturnType<typeof createTrace>
+): Promise<{ response: HybridResponse; trace: DebugTrace }> {
+  const ingredientName = intent.entities.ingredient || intent.entities.original || "";
+
+  const lookupStart = Date.now();
+  const result = findSubstitutesFor(ingredientName);
+  trace.addStage("knowledge", result.found ? `Found: ${result.original}` : `No match for "${ingredientName}"`, Date.now() - lookupStart, {
+    ingredient: ingredientName,
+    matched: result.found,
+    bestSub: result.best?.name ?? "none",
+    score: result.best?.score ?? 0,
+  });
+
+  let aiExplanation = "";
+  let wasMock = true;
+
+  if (result.found && result.best) {
+    const aiStart = Date.now();
+    const aiResult = await ai.substitutionAnalysis({
+      recipeName: context?.recipeName,
+      original: result.original,
+      substitute: result.best.name,
+      cuisine: context?.cuisine,
+    });
+    aiExplanation = aiResult.content;
+    wasMock = aiResult.wasMock;
+    trace.addStage("ai-enrichment", "Task: substitution-analysis", Date.now() - aiStart, {
+      model: aiResult.model,
+      latencyMs: aiResult.latencyMs,
+      wasMock: aiResult.wasMock,
+    });
+
+    logAiInteraction({
+      taskType: "substitution-analysis",
+      model: aiResult.model,
+      inputSummary: message,
+      inputContext: { original: result.original, substitute: result.best.name },
+      latencyMs: aiResult.latencyMs,
+      wasMock: aiResult.wasMock,
+    }).catch(() => {});
+  } else {
+    trace.addFlag("no-structured-match");
+  }
+
+  let response: HybridResponse;
+
+  if (result.found && result.best) {
+    const best = result.best;
+    response = {
+      type: "substitution",
+      fix: { title: `Best Substitute: ${best.name}`, instruction: best.quantityInstruction, urgency: "when-ready" },
+      alternatives: result.all.filter((s) => s.name !== best.name).map((s) => ({
+        title: s.name, instruction: s.quantityInstruction,
+        tradeoff: `${s.scoreLabel} (${s.score}% match) — ${s.impact.summary}`,
+      })),
+      impact: {
+        taste: { direction: best.impact.taste.score >= 4 ? "neutral" : "different", description: best.impact.taste.description },
+        texture: { direction: best.impact.texture.score >= 4 ? "neutral" : "different", description: best.impact.texture.description },
+        authenticity: { direction: best.impact.authenticity.score >= 4 ? "neutral" : best.impact.authenticity.score >= 3 ? "different" : "worse", description: best.impact.authenticity.description },
+      },
+      explanation: aiExplanation,
+      proTip: `${best.name} scores ${best.score}% compatibility as a replacement for ${result.original}.`,
+      source: { structured: true, ai: !!aiExplanation, confidence: "high" },
+    };
+  } else {
+    const aiResult = await ai.recipeReasoning({ recipeName: context?.recipeName || "the dish", question: message, cuisine: context?.cuisine });
+    response = {
+      type: "substitution",
+      fix: { title: "CookPilot's Suggestion", instruction: aiResult.content, urgency: "when-ready" },
+      alternatives: [],
+      impact: {
+        taste: { direction: "neutral", description: "Ask CookPilot for specifics" },
+        texture: { direction: "neutral", description: "Ask CookPilot for specifics" },
+        authenticity: { direction: "neutral", description: "Ask CookPilot for specifics" },
+      },
+      explanation: aiResult.content,
+      proTip: "When substituting, add at the same cooking stage as the original.",
+      source: { structured: false, ai: true, confidence: "low" },
+    };
+    wasMock = aiResult.wasMock;
+  }
+
+  return {
+    response,
+    trace: trace.finish({ structured: result.found, ai: true, mock: wasMock }),
+  };
+}
+
+// ─── Modification Flow ──────────────────────────────
+
+async function handleModification(
+  intent: ReturnType<typeof detectIntent>,
+  message: string,
+  context: AskRequest["context"],
+  trace: ReturnType<typeof createTrace>
+): Promise<{ response: HybridResponse; trace: DebugTrace }> {
+  // Default to butter chicken if no recipe context
+  const recipeId = context?.recipeId || "butter-chicken";
+  const recipe = getRecipeById(recipeId);
+
+  if (!recipe) {
+    const aiResult = await ai.recipeReasoning({ recipeName: "unknown", question: message });
+    return {
+      response: {
+        type: "general",
+        fix: { title: "CookPilot Says", instruction: aiResult.content, urgency: "optional" },
+        alternatives: [], impact: { taste: { direction: "neutral", description: "" }, texture: { direction: "neutral", description: "" }, authenticity: { direction: "neutral", description: "" } },
+        explanation: aiResult.content, proTip: "", source: { structured: false, ai: true, confidence: "low" },
+      },
+      trace: trace.finish({ structured: false, ai: true, mock: aiResult.wasMock }),
+    };
+  }
+
+  // Determine target reduction
+  const percentStr = intent.entities.percent;
+  const reductionPercent = percentStr ? parseInt(percentStr, 10) : 20;
+  const servings = recipe.servings;
+  const currentCalories = estimateCalories(recipe.ingredients, servings);
+  const targetCals = Math.round(currentCalories * (1 - reductionPercent / 100));
+
+  // Structured engine calculation
+  const calcStart = Date.now();
+  const plan = planCalorieReduction(recipe.ingredients, servings, targetCals, "smart-swap");
+  trace.addStage("engine", `Calorie plan: ${currentCalories} → ${targetCals} cal/serving`, Date.now() - calcStart, {
+    structured_modification_used: true,
+    originalCalories: currentCalories,
+    targetCalories: targetCals,
+    reductionPercent: plan.reductionPercent,
+    modificationsCount: plan.modifications.length,
+  });
+
+  // Build plan summary for AI
+  const planSummary = plan.modifications.length > 0
+    ? plan.modifications.map((m) =>
+        `- ${m.ingredient}: ${m.originalAmount} ${m.unit} → ${m.newAmount} ${m.unit} (saves ~${m.caloriesSaved} cal/serving)`
+      ).join("\n") + `\nResult: ${currentCalories} → ~${targetCals} cal/serving (${plan.reductionPercent}% reduction)`
+    : "No reductions needed.";
+
+  // AI enrichment
+  const aiStart = Date.now();
+  const aiResult = await ai.modificationAnalysis({
+    recipeName: recipe.title,
+    cuisine: recipe.cuisine,
+    modificationType: intent.subcategory || "reduce-calories",
+    structuredPlan: planSummary,
+  });
+  trace.addStage("ai-enrichment", "Task: modification-analysis", Date.now() - aiStart, {
+    model: aiResult.model,
+    latencyMs: aiResult.latencyMs,
+    wasMock: aiResult.wasMock,
+    responseLength: aiResult.content.length,
+    ai_enrichment_used: true,
+    ai_allowed_to_change_primary_modification: false,
+  });
+
+  if (aiResult.wasMock) trace.addFlag("ai-mock-response");
+
+  logAiInteraction({
+    taskType: "modification-analysis",
+    model: aiResult.model,
+    inputSummary: `${intent.subcategory}: ${recipe.title} (${plan.reductionPercent}%)`,
+    inputContext: { recipeId, modificationType: intent.subcategory, reductionPercent: plan.reductionPercent },
+    latencyMs: aiResult.latencyMs,
+    wasMock: aiResult.wasMock,
+  }).catch(() => {});
+
+  // Build warnings
+  const warnings: string[] = [];
+  if (plan.reductionPercent > 30) warnings.push("Large reduction — taste and texture will be noticeably different.");
+  if (plan.modifications.some((m) => m.ingredient.toLowerCase().includes("cream") && m.newAmount / m.originalAmount < 0.5)) {
+    warnings.push("Cream reduced significantly — creaminess will be affected.");
+  }
+
+  // Map to HybridResponse
+  const changeSummary = plan.modifications.map((m) =>
+    `${m.ingredient}: ${m.originalAmount} → ${m.newAmount} ${m.unit} (saves ${m.caloriesSaved} cal)`
+  ).join("; ");
+
+  const response: HybridResponse = {
+    type: "explanation",
+    fix: {
+      title: `Modify: ${reductionPercent}% Calorie Reduction`,
+      instruction: plan.modifications.length > 0
+        ? `Reduce ${plan.modifications.length} ingredient(s): ${changeSummary}. Total: ${currentCalories} → ${targetCals} cal/serving.`
+        : "No reductions needed — the dish is already at the target level.",
+      urgency: "when-ready",
+    },
+    alternatives: plan.modifications.length > 1
+      ? [{ title: "Proportional reduction", instruction: "Reduce all ingredients equally instead of targeting fats first.", tradeoff: "Simpler but affects flavor more evenly across all ingredients." }]
+      : [],
+    impact: {
+      taste: {
+        direction: plan.reductionPercent > 20 ? "different" : plan.reductionPercent > 10 ? "neutral" : "neutral",
+        description: plan.reductionPercent > 20 ? "Lighter, less rich" : "Minimal taste change",
+      },
+      texture: {
+        direction: plan.reductionPercent > 25 ? "different" : "neutral",
+        description: plan.reductionPercent > 25 ? "Less creamy mouthfeel" : "Minimal texture change",
+      },
+      authenticity: {
+        direction: plan.reductionPercent > 30 ? "worse" : plan.reductionPercent > 15 ? "different" : "neutral",
+        description: plan.reductionPercent > 30 ? "Adapted healthy version" : "Still recognizably authentic",
+      },
+    },
+    explanation: aiResult.content,
+    proTip: warnings.length > 0 ? warnings[0] : `${plan.reductionPercent}% reduction while preserving the core spice profile.`,
+    source: {
+      structured: true,
+      ai: true,
+      confidence: plan.reductionPercent <= 25 ? "high" : "medium",
+    },
+  };
+
+  return {
+    response,
+    trace: trace.finish({ structured: true, ai: true, mock: aiResult.wasMock }),
+  };
+}
+
+// ─── General Flow ───────────────────────────────────
+
+async function handleGeneral(
+  message: string,
+  context: AskRequest["context"],
+  trace: ReturnType<typeof createTrace>
+): Promise<{ response: HybridResponse; trace: DebugTrace }> {
+  const aiStart = Date.now();
+  const aiResult = await ai.recipeReasoning({
+    recipeName: context?.recipeName || "your dish",
+    question: message,
+    cuisine: context?.cuisine,
+  });
+  trace.addStage("ai-only", "Task: recipe-reasoning", Date.now() - aiStart, {
+    model: aiResult.model, latencyMs: aiResult.latencyMs, wasMock: aiResult.wasMock,
+  });
+  trace.addFlag("ai-only-no-structured-knowledge");
+
+  logAiInteraction({
+    taskType: "recipe-reasoning", model: aiResult.model, inputSummary: message,
+    latencyMs: aiResult.latencyMs, wasMock: aiResult.wasMock,
+  }).catch(() => {});
+
+  const response: HybridResponse = {
+    type: "general",
+    fix: { title: "CookPilot Says", instruction: aiResult.content, urgency: "optional" },
+    alternatives: [],
+    impact: { taste: { direction: "neutral", description: "" }, texture: { direction: "neutral", description: "" }, authenticity: { direction: "neutral", description: "" } },
+    explanation: aiResult.content, proTip: "",
+    source: { structured: false, ai: true, confidence: "medium" },
+  };
+
+  return { response, trace: trace.finish({ structured: false, ai: true, mock: aiResult.wasMock }) };
+}
