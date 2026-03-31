@@ -66,7 +66,7 @@ export default function SavedPage() {
   }, [tab, variants.length])
 
   const filteredRecipes = savedRecipes.filter(recipe =>
-    recipe.name.toLowerCase().includes(searchQuery.toLowerCase())
+    recipe.title.toLowerCase().includes(searchQuery.toLowerCase())
   )
 
   return (

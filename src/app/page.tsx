@@ -400,6 +400,8 @@ function FeaturedRecipeCard({ recipe, rank }: { recipe: Recipe; rank: number }) 
           src={image}
           alt={recipe.title}
           fill
+          sizes="80px"
+          loading={rank === 1 ? "eager" : "lazy"}
           className="object-cover transition-transform duration-300 group-hover:scale-105"
         />
       </div>
