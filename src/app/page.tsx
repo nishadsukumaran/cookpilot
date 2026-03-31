@@ -13,7 +13,6 @@ import {
   Sliders,
   Play,
   Clock,
-  Search,
   TrendingUp,
 } from "lucide-react";
 import { motion } from "framer-motion";

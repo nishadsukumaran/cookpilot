@@ -78,42 +78,47 @@ export default function RecipeDetailPage() {
 
   const recipe = mockRecipe ?? apiRecipe;
 
+  // Key state on recipe ID so it resets when recipe loads
+  const recipeId = recipe?.id ?? null;
   const [servings, setServings] = useState(recipe?.servings ?? 4);
   const [isSaved, setIsSaved] = useState(false);
   const [activeAction, setActiveAction] = useState<string | undefined>();
+  const [initializedFor, setInitializedFor] = useState<string | null>(recipeId);
 
-  // Sync servings when recipe loads async
-  useEffect(() => {
-    if (recipe) setServings(recipe.servings);
-  }, [recipe]);
+  // When recipe first loads (null → loaded), reset servings to match
+  if (recipeId && initializedFor !== recipeId) {
+    setServings(recipe!.servings);
+    setInitializedFor(recipeId);
+  }
 
   // All hooks must be called before early returns (React rules of hooks)
-  const safeIngredients = recipe?.ingredients ?? [];
-  const safeServings = recipe?.servings ?? 4;
-  const safeCalories = recipe?.calories ?? 0;
-
   const transformation = useMemo(
-    () =>
-      transformRecipe(safeIngredients, safeServings, safeCalories, {
-        targetServings: servings,
-      }),
-    [safeIngredients, safeServings, safeCalories, servings]
+    () => {
+      const ings = recipe?.ingredients ?? [];
+      const srvs = recipe?.servings ?? 4;
+      const cals = recipe?.calories ?? 0;
+      return transformRecipe(ings, srvs, cals, { targetServings: servings });
+    },
+    [recipe, servings]
   );
 
   const isModified = recipe ? servings !== recipe.servings : false;
   const transformationType = "scaling" as const;
 
   const trustMetrics = useMemo(
-    () =>
-      computeTrustMetrics(
-        safeIngredients,
+    () => {
+      const ings = recipe?.ingredients ?? [];
+      const cals = recipe?.calories ?? 0;
+      return computeTrustMetrics(
+        ings,
         transformation.ingredients,
-        safeCalories,
+        cals,
         transformation.calories,
         transformation.warnings,
         transformationType
-      ),
-    [safeIngredients, safeCalories, transformation, transformationType]
+      );
+    },
+    [recipe, transformation, transformationType]
   );
 
   if (loading) {
