@@ -117,8 +117,10 @@ export default function HomePage() {
             src={getRecipeImage(featuredRecipe)}
             alt="Featured recipe"
             fill
-            className="object-cover"
+            sizes="100vw"
             priority
+            loading="eager"
+            className="object-cover"
           />
           <div className="absolute inset-0 image-overlay-bottom" />
           {/* Dark top scrim for logo readability */}

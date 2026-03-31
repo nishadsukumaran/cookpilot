@@ -162,8 +162,9 @@ export default function RecipeDetailPage() {
           src={heroImage}
           alt={recipe.title}
           fill
-          className="object-cover"
+          sizes="100vw"
           priority
+          className="object-cover"
         />
         <div className="absolute inset-0 image-overlay-bottom" />
 
