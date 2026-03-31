@@ -87,6 +87,35 @@ export default function RecipeDetailPage() {
     if (recipe) setServings(recipe.servings);
   }, [recipe]);
 
+  // All hooks must be called before early returns (React rules of hooks)
+  const safeIngredients = recipe?.ingredients ?? [];
+  const safeServings = recipe?.servings ?? 4;
+  const safeCalories = recipe?.calories ?? 0;
+
+  const transformation = useMemo(
+    () =>
+      transformRecipe(safeIngredients, safeServings, safeCalories, {
+        targetServings: servings,
+      }),
+    [safeIngredients, safeServings, safeCalories, servings]
+  );
+
+  const isModified = recipe ? servings !== recipe.servings : false;
+  const transformationType = "scaling" as const;
+
+  const trustMetrics = useMemo(
+    () =>
+      computeTrustMetrics(
+        safeIngredients,
+        transformation.ingredients,
+        safeCalories,
+        transformation.calories,
+        transformation.warnings,
+        transformationType
+      ),
+    [safeIngredients, safeCalories, transformation, transformationType]
+  );
+
   if (loading) {
     return (
       <div className="flex min-h-screen items-center justify-center">
@@ -108,30 +137,6 @@ export default function RecipeDetailPage() {
       </div>
     );
   }
-
-  const transformation = useMemo(
-    () =>
-      transformRecipe(recipe.ingredients, recipe.servings, recipe.calories, {
-        targetServings: servings,
-      }),
-    [recipe, servings]
-  );
-
-  const isModified = servings !== recipe.servings;
-  const transformationType = "scaling" as const;
-
-  const trustMetrics = useMemo(
-    () =>
-      computeTrustMetrics(
-        recipe.ingredients,
-        transformation.ingredients,
-        recipe.calories,
-        transformation.calories,
-        transformation.warnings,
-        transformationType
-      ),
-    [recipe, transformation, transformationType]
-  );
 
   function handleQuickAction(actionId: string) {
     if (!recipe) return;
@@ -163,7 +168,14 @@ export default function RecipeDetailPage() {
     }
   }
 
-  const heroImage = recipeImageMap[recipe.id] ?? "/images/butter-chicken.jpg";
+  // Known images for seeded recipes; imported recipes get a cuisine-based fallback
+  const cuisineFallback: Record<string, string> = {
+    Indian: "/images/butter-chicken.jpg",
+    Arabic: "/images/machboos.jpg",
+    "Middle Eastern": "/images/shakshuka.jpg",
+    Italian: "/images/butter-chicken.jpg",
+  };
+  const heroImage = recipeImageMap[recipe.id] ?? cuisineFallback[recipe.cuisine] ?? "/images/butter-chicken.jpg";
 
   return (
     <div className="min-h-screen pb-28 bg-background">
