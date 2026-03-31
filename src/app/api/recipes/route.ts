@@ -12,7 +12,7 @@
  */
 
 import { type NextRequest } from "next/server";
-import { eq, or, ilike, desc } from "drizzle-orm";
+import { eq, or, and, ilike, desc, lt, gte, gt, sql } from "drizzle-orm";
 import { getDb } from "@/lib/db";
 import * as schema from "@/lib/db/schema";
 
@@ -87,35 +87,69 @@ function shapeRecipe(
 export async function GET(request: NextRequest) {
   try {
     const db = getDb();
-    const q = request.nextUrl.searchParams.get("q")?.trim();
+    const params = request.nextUrl.searchParams;
+    const q = params.get("q")?.trim();
+    const cuisine = params.get("cuisine")?.trim();
+    const time = params.get("time")?.trim();
+    const difficulty = params.get("difficulty")?.trim();
+    const dietary = params.get("dietary")?.trim();
 
-    // ─── Fetch recipes ────────────────────────────────
-    let recipeRows: (typeof schema.recipes.$inferSelect)[];
+    // ─── Build WHERE conditions ───────────────────────
+    const conditions = [];
 
+    // Text search
     if (q) {
       const pattern = `%${q}%`;
-      recipeRows = await db
-        .select()
-        .from(schema.recipes)
-        .where(
-          or(
-            ilike(schema.recipes.title, pattern),
-            ilike(schema.recipes.cuisine, pattern),
-          ),
-        )
-        .orderBy(desc(schema.recipes.rating));
-    } else {
-      recipeRows = await db
-        .select()
-        .from(schema.recipes)
-        .where(
-          or(
-            eq(schema.recipes.isPublished, true),
-            eq(schema.recipes.isUserRecipe, true),
-          ),
-        )
-        .orderBy(desc(schema.recipes.rating));
+      conditions.push(
+        or(
+          ilike(schema.recipes.title, pattern),
+          ilike(schema.recipes.cuisine, pattern),
+          ilike(schema.recipes.description, pattern),
+        ),
+      );
     }
+
+    // Cuisine filter
+    if (cuisine) {
+      conditions.push(eq(schema.recipes.cuisine, cuisine));
+    }
+
+    // Time filter
+    if (time === "under-30") {
+      conditions.push(lt(schema.recipes.cookingTime, 30));
+    } else if (time === "30-60") {
+      conditions.push(gte(schema.recipes.cookingTime, 30));
+      conditions.push(lt(schema.recipes.cookingTime, 61));
+    } else if (time === "60-plus") {
+      conditions.push(gt(schema.recipes.cookingTime, 60));
+    }
+
+    // Difficulty filter
+    if (difficulty) {
+      conditions.push(eq(schema.recipes.difficulty, difficulty));
+    }
+
+    // Dietary filter (check tags array)
+    if (dietary) {
+      conditions.push(sql`${dietary} = ANY(${schema.recipes.tags})`);
+    }
+
+    // Default: show published or user recipes when no filters
+    if (conditions.length === 0) {
+      conditions.push(
+        or(
+          eq(schema.recipes.isPublished, true),
+          eq(schema.recipes.isUserRecipe, true),
+        ),
+      );
+    }
+
+    // ─── Fetch recipes ────────────────────────────────
+    const recipeRows = await db
+      .select()
+      .from(schema.recipes)
+      .where(and(...conditions))
+      .orderBy(desc(schema.recipes.rating));
 
     if (recipeRows.length === 0) {
       return Response.json({ recipes: [] });

@@ -12,6 +12,7 @@
 import { generateText } from "ai";
 import { gateway } from "@ai-sdk/gateway";
 import { shouldUseMock, getModel, AI_CONFIG } from "./gateway";
+import { buildFilterPromptContext } from "@/lib/search/filters";
 
 // ─── Response Type ──────────────────────────────────
 
@@ -70,6 +71,7 @@ export interface ModificationInput {
 export interface RecipeGenerationInput {
   query: string;
   count?: number; // how many candidates to generate (default 3)
+  filters?: import("@/lib/search/filters").SearchFilters;
 }
 
 // ─── AI Service ─────────────────────────────────────
@@ -281,9 +283,15 @@ function buildAuthenticityPrompt(input: AuthenticityInput): string {
 
 function buildRecipeGenPrompt(input: RecipeGenerationInput): string {
   const count = input.count ?? 3;
-  return `Generate ${count} recipe${count > 1 ? "s" : ""} for: "${input.query}"
+  let prompt = `Generate ${count} recipe${count > 1 ? "s" : ""} for: "${input.query}"`;
 
-Return ONLY a JSON array. No other text.`;
+  if (input.filters) {
+    const filterContext = buildFilterPromptContext(input.filters);
+    if (filterContext) prompt += filterContext;
+  }
+
+  prompt += `\n\nReturn ONLY a JSON array. No other text.`;
+  return prompt;
 }
 
 function buildModificationPrompt(input: ModificationInput): string {

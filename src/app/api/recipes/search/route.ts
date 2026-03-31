@@ -3,6 +3,7 @@ import { ai } from "@/lib/ai";
 import { logAiInteraction } from "@/lib/db/queries";
 import { createTrace, isDev } from "@/lib/debug/types";
 import type { Ingredient, CookingStep } from "@/lib/engines/types";
+import type { SearchFilters } from "@/lib/search/filters";
 
 const DEV_USER = "dev-user";
 
@@ -24,7 +25,7 @@ interface RecipeCandidate {
 
 export async function POST(req: Request) {
   const body = await req.json();
-  const { query } = body as { query: string };
+  const { query, filters } = body as { query: string; filters?: SearchFilters };
 
   if (!query?.trim()) {
     return NextResponse.json(
@@ -37,7 +38,7 @@ export async function POST(req: Request) {
 
   // ─── AI Generation ───────────────────────────────
   const aiStart = Date.now();
-  const aiResult = await ai.recipeGeneration({ query, count: 3 });
+  const aiResult = await ai.recipeGeneration({ query, count: 3, filters: filters ?? undefined });
 
   trace.addStage("ai-generation", "Task: recipe-generation", Date.now() - aiStart, {
     model: aiResult.model,
