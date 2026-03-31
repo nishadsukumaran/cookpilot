@@ -50,6 +50,8 @@ export function RecipeDiscoveryCard({
             alt={recipe.title}
             fill
             sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
+            loading={isTop ? "eager" : "lazy"}
+            priority={isTop}
             className="object-cover transition-transform duration-500 group-hover:scale-105"
           />
           <div className="absolute inset-0 image-overlay-bottom" />

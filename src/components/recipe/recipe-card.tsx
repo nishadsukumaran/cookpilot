@@ -34,14 +34,14 @@ export function RecipeCard({
           <div className="relative h-20 w-20 shrink-0 overflow-hidden rounded-md bg-muted">
             <Image
               src={recipe.image || "/images/placeholder.jpg"}
-              alt={recipe.name}
+              alt={recipe.title}
               fill
               sizes="80px"
               className="object-cover group-hover:scale-105 transition-transform duration-300"
             />
           </div>
           <div className="flex flex-1 flex-col justify-center gap-1.5 overflow-hidden">
-            <h3 className="truncate font-semibold text-sm text-foreground">{recipe.name}</h3>
+            <h3 className="truncate font-semibold text-sm text-foreground">{recipe.title}</h3>
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
               <span className="flex items-center gap-0.5">
                 <Clock className="h-3.5 w-3.5" />
@@ -72,7 +72,7 @@ export function RecipeCard({
           <div className="relative h-48 w-full bg-surface overflow-hidden">
             <Image
               src={recipe.image || "/images/placeholder.jpg"}
-              alt={recipe.name}
+              alt={recipe.title}
               fill
               sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
               className="object-cover group-hover:scale-105 transition-transform duration-300"
@@ -90,7 +90,7 @@ export function RecipeCard({
             </div>
           </div>
           <div className="p-4">
-            <h3 className="font-heading text-lg font-bold text-foreground">{recipe.name}</h3>
+            <h3 className="font-heading text-lg font-bold text-foreground">{recipe.title}</h3>
             <p className="mt-2 text-sm text-muted-foreground line-clamp-2">
               {recipe.description || recipe.cuisineType}
             </p>
@@ -124,7 +124,7 @@ export function RecipeCard({
         <div className="relative h-40 w-full bg-surface overflow-hidden">
           <Image
             src={recipe.image || "/images/placeholder.jpg"}
-            alt={recipe.name}
+            alt={recipe.title}
             fill
             sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
             className="object-cover group-hover:scale-105 transition-transform duration-300"
@@ -138,7 +138,7 @@ export function RecipeCard({
           )}
         </div>
         <div className="p-4">
-          <h3 className="font-semibold text-sm text-foreground">{recipe.name}</h3>
+          <h3 className="font-semibold text-sm text-foreground">{recipe.title}</h3>
           <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground flex-wrap">
             <span className="flex items-center gap-0.5">
               <Clock className="h-3.5 w-3.5" />
