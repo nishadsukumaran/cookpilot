@@ -116,6 +116,9 @@ async function callAi(
 ): Promise<AiResponse> {
   const start = Date.now();
   const modelId = getModel("primary");
+  const tokenLimit = taskType === "recipe-generation"
+    ? AI_CONFIG.maxTokensRecipeGen
+    : AI_CONFIG.maxTokens;
 
   // Live mode — real AI Gateway call
   if (!shouldUseMock()) {
@@ -124,7 +127,7 @@ async function callAi(
         model: gateway(modelId),
         system: systemPrompt,
         prompt: userPrompt,
-        maxOutputTokens: AI_CONFIG.maxTokens,
+        maxOutputTokens: tokenLimit,
       });
 
       return {

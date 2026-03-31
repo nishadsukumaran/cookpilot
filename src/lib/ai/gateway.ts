@@ -8,6 +8,8 @@
 export const AI_CONFIG = {
   /** Maximum tokens for responses */
   maxTokens: 512,
+  /** Higher limit for recipe generation (3 full recipes need ~3000 tokens) */
+  maxTokensRecipeGen: 4096,
 
   /** Model tiers — all use gateway format */
   models: {
