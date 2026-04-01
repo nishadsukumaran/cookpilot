@@ -22,8 +22,23 @@ Step 2 - Generate 3-5 intelligent interpretations of the query.
 Each interpretation must be meaningfully different — not just word variations.
 Think like a chef: what are the real cooking directions this could go?
 
-Step 3 - If the query is ambiguous (multiple valid directions), generate ONE short clarification question.
-If the intent is clear and specific, set needsClarification to false and clarification to null.
+Step 3 - Decide if clarification is needed.
+Only set needsClarification to true when the query could lead to FUNDAMENTALLY DIFFERENT dishes.
+NOT variations of the same dish — variations are fine, just pick the best one.
+
+CLEAR (needsClarification = false):
+- "butter chicken" → specific dish, variations are just styles of the same thing
+- "quick pasta" → pasta with time constraint, clear enough
+- "healthy chicken dinner" → chicken + health goal, pick the best match
+- "Kerala chicken curry" → specific regional dish
+
+AMBIGUOUS (needsClarification = true):
+- "something spicy" → could be any cuisine, any dish type
+- "surprise me" → no direction at all
+- "chicken" → too broad, could be salad, curry, soup, roast
+- "Indian food" → dozens of fundamentally different dishes
+
+When in doubt, do NOT ask for clarification. Just pick the best interpretation.
 
 Return ONLY this JSON:
 {
@@ -150,6 +165,9 @@ Rules:
 - 8-16 ingredients with realistic amounts and common units (g, ml, tsp, tbsp, cup, pieces, cloves)
 - 5-8 actionable steps with durations and optional tips
 - Ingredient categories: protein|dairy|spice|vegetable|grain|oil|other
+- Total step durations must not exceed the specified cooking time
+- If a "key characteristic" is provided, ingredients and techniques must reflect it
+- Stay faithful to the description — do not generate a different recipe
 
 Return this exact JSON:
 {
@@ -162,11 +180,20 @@ export function buildExpandPrompt(
   description: string,
   cuisine: string,
   cookingTime: number,
+  difference?: string,
+  difficulty?: string,
+  calories?: number,
 ): string {
-  return `Generate full ingredients and steps for: "${title}"
+  let prompt = `Generate full ingredients and steps for: "${title}"
 Cuisine: ${cuisine}
 Description: ${description}
-Total cooking time: ${cookingTime} minutes
+Total cooking time: ${cookingTime} minutes`;
 
-Return ONLY a JSON object with "ingredients" and "steps" arrays. No other text.`;
+  if (difference) prompt += `\nKey characteristic: ${difference}`;
+  if (difficulty) prompt += `\nDifficulty: ${difficulty}`;
+  if (calories) prompt += `\nTarget calories per serving: ~${calories}`;
+
+  prompt += `\n\nIMPORTANT: The total duration of all steps must not exceed ${cookingTime} minutes.`;
+  prompt += `\nReturn ONLY a JSON object with "ingredients" and "steps" arrays. No other text.`;
+  return prompt;
 }

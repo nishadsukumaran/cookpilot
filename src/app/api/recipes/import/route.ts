@@ -57,6 +57,37 @@ export async function POST(req: Request) {
       ? difficulty!
       : "Medium";
 
+    // ─── Ingredient Validation ────────────────────────
+    for (const ing of ingredients) {
+      if (!ing.name?.trim()) {
+        return NextResponse.json({ error: "Each ingredient must have a name" }, { status: 400 });
+      }
+      if (typeof ing.amount !== "number" || ing.amount <= 0 || !isFinite(ing.amount)) {
+        return NextResponse.json({ error: `Invalid amount for ingredient "${ing.name}"` }, { status: 400 });
+      }
+    }
+    if (ingredients.length > 30) {
+      return NextResponse.json({ error: "Too many ingredients (max 30)" }, { status: 400 });
+    }
+
+    // ─── Step Validation ──────────────────────────────
+    for (const step of steps) {
+      if (!step.instruction?.trim()) {
+        return NextResponse.json({ error: "Each step must have an instruction" }, { status: 400 });
+      }
+      if (step.duration != null && (typeof step.duration !== "number" || step.duration < 0)) {
+        return NextResponse.json({ error: `Invalid duration for step ${step.number}` }, { status: 400 });
+      }
+    }
+    if (steps.length > 20) {
+      return NextResponse.json({ error: "Too many steps (max 20)" }, { status: 400 });
+    }
+
+    // ─── Time & Calorie Validation ────────────────────
+    const safeCookingTime = (typeof cookingTime === "number" && cookingTime > 0 && cookingTime <= 1440) ? cookingTime : 30;
+    const safePrepTime = (typeof prepTime === "number" && prepTime >= 0 && prepTime <= 1440) ? prepTime : 15;
+    const safeCalories = (typeof calories === "number" && calories >= 0 && calories <= 5000) ? calories : null;
+
     const db = getDb();
     // Add random suffix to avoid slug collisions on repeat imports
     const baseSlug = slugify(title);
@@ -71,11 +102,11 @@ export async function POST(req: Request) {
         title,
         description: description ?? null,
         cuisine: cuisine ?? "International",
-        cookingTime: cookingTime ?? 0,
-        prepTime: prepTime ?? 0,
+        cookingTime: safeCookingTime,
+        prepTime: safePrepTime,
         difficulty: safeDifficulty,
         servings: servings ?? 4,
-        calories: calories ?? null,
+        calories: safeCalories,
         tags: tags ?? [],
         sourceUrl: "ai-generated",
         ownerId: DEV_USER,

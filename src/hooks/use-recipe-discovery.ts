@@ -3,6 +3,14 @@
 import { useState, useCallback } from "react";
 import type { SearchFilters } from "@/lib/search/filters";
 
+function trackDiscoveryEvent(action: string, data?: Record<string, unknown>) {
+  fetch("/api/analytics", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ event: "discovery", action, ...data, timestamp: Date.now() }),
+  }).catch(() => {});
+}
+
 // ─── Types ─────────────────────────────────────────
 
 export interface PrimaryRecipe {
@@ -121,7 +129,9 @@ export function useRecipeDiscovery(): UseRecipeDiscoveryReturn {
       setAlternatives(data.alternatives ?? []);
       setFollowups(data.followups ?? []);
       setPhase("complete");
+      trackDiscoveryEvent("generate_complete", { query: q, primaryTitle: data.primary?.title, alternativeCount: data.alternatives?.length ?? 0 });
     } catch {
+      trackDiscoveryEvent("error", { query: q, phase: "generate" });
       setError("Failed to generate recipes. Try again.");
       setPhase("error");
     }
@@ -141,6 +151,7 @@ export function useRecipeDiscovery(): UseRecipeDiscoveryReturn {
     setError(null);
     setStoredFilters(filters);
     setPhase("understanding");
+    trackDiscoveryEvent("understand_start", { query: q });
 
     // Phase 1
     fetch("/api/recipes/discover", {
@@ -157,24 +168,29 @@ export function useRecipeDiscovery(): UseRecipeDiscoveryReturn {
         setExpansions(data.expansions ?? []);
 
         if (data.needsClarification && data.clarification) {
+          trackDiscoveryEvent("clarification_shown", { query: q, intent: data.intent });
           setClarification(data.clarification);
           setPhase("clarifying");
         } else {
+          trackDiscoveryEvent("auto_generate", { query: q, intent: data.intent });
           // Auto-proceed to phase 2
           runPhase2(q, null, filters);
         }
       })
       .catch(() => {
+        trackDiscoveryEvent("error", { query: q, phase: "understand" });
         setError("Failed to understand query. Try again.");
         setPhase("error");
       });
   }, [runPhase2]);
 
   const selectClarification = useCallback((choice: string) => {
+    trackDiscoveryEvent("clarification_selected", { query, choice });
     runPhase2(query, choice, storedFilters);
   }, [query, storedFilters, runPhase2]);
 
   const skipClarification = useCallback(() => {
+    trackDiscoveryEvent("clarification_skipped", { query });
     runPhase2(query, null, storedFilters);
   }, [query, storedFilters, runPhase2]);
 
@@ -193,11 +209,15 @@ export function useRecipeDiscovery(): UseRecipeDiscoveryReturn {
           description: alt.description,
           cuisine: alt.cuisine,
           cookingTime: alt.cookingTime,
+          difference: alt.difference,
+          difficulty: alt.difficulty,
+          calories: alt.calories,
         }),
       });
       if (!res.ok) throw new Error("Expand failed");
       const data = await res.json();
 
+      trackDiscoveryEvent("alternative_expanded", { title: alt.title, index });
       setExpandedAlternatives((prev) => {
         const next = new Map(prev);
         next.set(index, {

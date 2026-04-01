@@ -8,25 +8,36 @@ const DEV_USER = "dev-user";
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const { title, description, cuisine, cookingTime } = body as {
+    const { title, description, cuisine, cookingTime, difference, difficulty, calories } = body as {
       title: string;
       description: string;
       cuisine: string;
       cookingTime: number;
+      difference?: string;
+      difficulty?: string;
+      calories?: number;
     };
 
     if (!title?.trim()) {
       return NextResponse.json({ error: "title is required" }, { status: 400 });
     }
 
-    const aiResult = await ai.discoverExpand({ title, description: description ?? "", cuisine: cuisine ?? "International", cookingTime: cookingTime ?? 30 });
+    const aiResult = await ai.discoverExpand({
+      title,
+      description: description ?? "",
+      cuisine: cuisine ?? "International",
+      cookingTime: cookingTime ?? 30,
+      difference,
+      difficulty,
+      calories,
+    });
 
     logAiInteraction({
       userId: DEV_USER,
       taskType: "discover-expand",
       model: aiResult.model,
       inputSummary: title,
-      inputContext: { title, cuisine, cookingTime },
+      inputContext: { title, cuisine, cookingTime, difference, difficulty, calories },
       latencyMs: aiResult.latencyMs,
       wasMock: aiResult.wasMock,
     }).catch(() => {});

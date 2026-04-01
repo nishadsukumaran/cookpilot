@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { ai } from "@/lib/ai";
 import { logAiInteraction } from "@/lib/db/queries";
+import { createTrace, isDev } from "@/lib/debug/types";
 import type { SearchFilters } from "@/lib/search/filters";
 import type { Ingredient, CookingStep } from "@/lib/engines/types";
 
@@ -74,12 +75,22 @@ async function handleUnderstand(
     };
   }
 
+  const trace = createTrace();
+  trace.addStage("ai-call", `discover-understand`, aiResult.latencyMs, {
+    model: aiResult.model,
+    wasMock: aiResult.wasMock,
+    intent: parsed.intent,
+    expansionCount: parsed.expansions?.length ?? 0,
+    needsClarification: parsed.needsClarification,
+  });
+
   return NextResponse.json({
     phase: "understand",
     intent: parsed.intent ?? "dish_search",
     expansions: parsed.expansions ?? [query],
     needsClarification: parsed.needsClarification ?? false,
     clarification: parsed.clarification ?? null,
+    ...(isDev() ? { _trace: trace.finish({ structured: false, ai: true, mock: aiResult.wasMock }) } : {}),
   });
 }
 
@@ -156,12 +167,35 @@ async function handleGenerate(
       "Start cooking",
     ];
 
+    // Validate primary has usable content
+    if (primary && (primary.ingredients.length === 0 || primary.steps.length === 0)) {
+      console.error("[discover-generate] Primary recipe has no ingredients or steps");
+      return NextResponse.json({
+        phase: "generate",
+        intent: resolvedIntent ?? query,
+        primary: null,
+        alternatives: [],
+        followups: [],
+        error: "AI generated an incomplete recipe. Please try again.",
+      });
+    }
+
+    const trace = createTrace();
+    trace.addStage("ai-call", `discover-generate`, aiResult.latencyMs, {
+      model: aiResult.model,
+      wasMock: aiResult.wasMock,
+      hasIngredients: primary?.ingredients?.length ?? 0,
+      hasSteps: primary?.steps?.length ?? 0,
+      alternativeCount: alternatives.length,
+    });
+
     return NextResponse.json({
       phase: "generate",
       intent: resolvedIntent ?? query,
       primary,
       alternatives,
       followups,
+      ...(isDev() ? { _trace: trace.finish({ structured: false, ai: true, mock: aiResult.wasMock }) } : {}),
     });
   } catch (error) {
     console.error("[discover-generate] JSON parse failed:", error, "Raw:", aiResult.content.slice(0, 500));

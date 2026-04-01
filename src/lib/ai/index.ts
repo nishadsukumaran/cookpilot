@@ -126,9 +126,12 @@ export const ai = {
     description: string;
     cuisine: string;
     cookingTime: number;
+    difference?: string;
+    difficulty?: string;
+    calories?: number;
   }): Promise<AiResponse> {
     const { DISCOVER_EXPAND_SYSTEM, buildExpandPrompt } = await import("./prompts/discover");
-    return callAi("discover-expand", DISCOVER_EXPAND_SYSTEM, buildExpandPrompt(input.title, input.description, input.cuisine, input.cookingTime), input.title);
+    return callAi("discover-expand", DISCOVER_EXPAND_SYSTEM, buildExpandPrompt(input.title, input.description, input.cuisine, input.cookingTime, input.difference, input.difficulty, input.calories), input.title);
   },
 
   isLive(): boolean {
