@@ -10,18 +10,33 @@ export default function SavedError({
   reset: () => void;
 }) {
   useEffect(() => {
+    // Log the exact error to help debug
+    console.error("[Saved Page Error]", error.message, error.stack);
+
+    // Report to server for Vercel logs visibility
+    fetch("/api/analytics", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        event: "client_error",
+        page: "/saved",
+        message: error.message,
+        stack: error.stack?.slice(0, 500),
+        digest: error.digest,
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+
     // Auto-reload on chunk mismatch (deployment race condition)
     const msg = error.message ?? "";
     if (
       msg.includes("ChunkLoadError") ||
       msg.includes("Loading chunk") ||
-      msg.includes("Failed to fetch") ||
       msg.includes("Unexpected token")
     ) {
       window.location.reload();
       return;
     }
-    console.error("[Saved Page Error]", error);
   }, [error]);
 
   return (
@@ -33,6 +48,9 @@ export default function SavedError({
         </h2>
         <p className="mt-2 text-sm text-muted-foreground">
           This usually fixes itself with a refresh.
+        </p>
+        <p className="mt-2 text-[10px] text-muted-foreground/50 font-mono max-w-xs break-all">
+          {error.message}
         </p>
         <button
           onClick={() => window.location.reload()}
