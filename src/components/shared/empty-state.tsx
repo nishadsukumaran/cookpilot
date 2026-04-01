@@ -16,8 +16,9 @@ export function EmptyState({
   action,
   className,
 }: EmptyStateProps) {
-  // Check if icon is a Lucide component (function) vs a ReactNode
-  const isIconComponent = typeof icon === 'function'
+  // Check if icon is a component (function or forwardRef object) vs a ReactNode
+  const isIconComponent = typeof icon === 'function' ||
+    (typeof icon === 'object' && icon !== null && '$$typeof' in icon)
 
   return (
     <div
