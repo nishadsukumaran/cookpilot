@@ -64,6 +64,9 @@ export async function POST(req: Request) {
     case "scaling":
       ({ response, trace: debugTrace } = await handleScaling(intent, message, context, trace));
       break;
+    case "recipe-search":
+      // Recipe search queries get a simplified discovery response
+      return handleRecipeSearch(message, trace);
     default:
       ({ response, trace: debugTrace } = await handleGeneral(message, context, trace));
       break;
@@ -804,6 +807,54 @@ async function handleEdit(
 }
 
 // ─── General Flow ───────────────────────────────────
+
+async function handleRecipeSearch(
+  message: string,
+  trace: ReturnType<typeof createTrace>,
+) {
+  // Phase 1: Understand
+  const understandResult = await ai.discoverUnderstand({ query: message });
+  trace.addStage("discover-understand", `Intent: ${understandResult.content.slice(0, 100)}`, understandResult.latencyMs);
+
+  let understood;
+  try {
+    let jsonStr = understandResult.content.trim();
+    const fenceMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
+    if (fenceMatch) jsonStr = fenceMatch[1].trim();
+    understood = JSON.parse(jsonStr);
+  } catch {
+    understood = { intent: "dish_search", expansions: [message], needsClarification: false, clarification: null };
+  }
+
+  // Phase 2: Generate (auto-proceed, no clarification in chat mode)
+  const generateResult = await ai.discoverGenerate({ query: message, resolvedIntent: null });
+  trace.addStage("discover-generate", `Generated recipe`, generateResult.latencyMs);
+
+  let generated;
+  try {
+    let jsonStr = generateResult.content.trim();
+    const fenceMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
+    if (fenceMatch) jsonStr = fenceMatch[1].trim();
+    generated = JSON.parse(jsonStr);
+  } catch {
+    generated = { primary: null, alternatives: [], followups: [] };
+  }
+
+  const payload: Record<string, unknown> = {
+    type: "recipe-search",
+    intent: understood.intent ?? "dish_search",
+    expansions: understood.expansions ?? [],
+    primary: generated.primary ?? null,
+    alternatives: generated.alternatives ?? [],
+    followups: generated.followups ?? [],
+  };
+
+  if (isDev()) {
+    payload._trace = trace.finish({ structured: false, ai: true, mock: understandResult.wasMock });
+  }
+
+  return NextResponse.json(payload);
+}
 
 async function handleGeneral(
   message: string,

@@ -202,6 +202,28 @@ const rules: PatternRule[] = [
       /add\s+(?:this\s+)?to\s+my\s+recipes/i,
     ],
   },
+
+  // Recipe search patterns
+  {
+    category: "recipe-search",
+    patterns: [
+      /recipe\s+for\b/i,
+      /how\s+(?:to|do\s+(?:I|you))\s+(?:make|cook|prepare)\b/i,
+      /make\s+(?:me\s+)?(?:a\s+|some\s+)?(.+)/i,
+      /I\s+want\s+(?:to\s+(?:make|cook|eat)|some)\b/i,
+      /suggest\s+(?:a\s+|some\s+)?recipe/i,
+      /find\s+(?:me\s+)?(?:a\s+)?recipe/i,
+      /show\s+(?:me\s+)?(?:a\s+)?recipe/i,
+      /what\s+(?:can|should)\s+I\s+(?:make|cook)\b/i,
+      /looking\s+for\s+(?:a\s+)?(.+)\s+recipe/i,
+      /surprise\s+me/i,
+      /(?:quick|easy|healthy|simple)\s+(?:dinner|lunch|breakfast|meal|recipe)/i,
+      /(?:chicken|beef|lamb|fish|tofu|paneer|shrimp)\s+(?:curry|stir.?fry|stew|soup|salad|pasta|rice)/i,
+    ],
+    entityExtractors: {
+      dish: /(?:recipe\s+for|make|cook|prepare|looking\s+for)\s+(?:a\s+|some\s+)?(.+?)(?:\s+recipe)?$/i,
+    },
+  },
 ];
 
 // ─── Public API ─────────────────────────────────────

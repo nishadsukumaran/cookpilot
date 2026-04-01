@@ -72,7 +72,7 @@ export interface ImpactDimension {
 
 /** Intent detected from user input */
 export interface DetectedIntent {
-  category: "rescue" | "substitution" | "scaling" | "calorie" | "modification" | "edit" | "general";
+  category: "rescue" | "substitution" | "scaling" | "calorie" | "modification" | "edit" | "recipe-search" | "general";
   subcategory?: string;
   confidence: number;
   entities: Record<string, string>;

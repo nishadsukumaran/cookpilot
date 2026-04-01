@@ -13,6 +13,7 @@ import { generateText } from "ai";
 import { gateway } from "@ai-sdk/gateway";
 import { shouldUseMock, getModel, AI_CONFIG } from "./gateway";
 import { buildFilterPromptContext } from "@/lib/search/filters";
+import type { SearchFilters } from "@/lib/search/filters";
 
 // ─── Response Type ──────────────────────────────────
 
@@ -101,6 +102,35 @@ export const ai = {
     return callAi("recipe-generation", RECIPE_GEN_SYSTEM, buildRecipeGenPrompt(input), input.query);
   },
 
+  async discoverUnderstand(input: {
+    query: string;
+    preferences?: { spicePreference?: string; dietary?: string[]; cuisines?: string[] };
+    filters?: SearchFilters;
+  }): Promise<AiResponse> {
+    const { DISCOVER_UNDERSTAND_SYSTEM, buildUnderstandPrompt } = await import("./prompts/discover");
+    return callAi("discover-understand", DISCOVER_UNDERSTAND_SYSTEM, buildUnderstandPrompt(input.query, input.preferences, input.filters), input.query);
+  },
+
+  async discoverGenerate(input: {
+    query: string;
+    resolvedIntent: string | null;
+    preferences?: { spicePreference?: string; dietary?: string[]; cuisines?: string[] };
+    filters?: SearchFilters;
+  }): Promise<AiResponse> {
+    const { DISCOVER_GENERATE_SYSTEM, buildGeneratePrompt } = await import("./prompts/discover");
+    return callAi("discover-generate", DISCOVER_GENERATE_SYSTEM, buildGeneratePrompt(input.query, input.resolvedIntent, input.preferences, input.filters), input.query);
+  },
+
+  async discoverExpand(input: {
+    title: string;
+    description: string;
+    cuisine: string;
+    cookingTime: number;
+  }): Promise<AiResponse> {
+    const { DISCOVER_EXPAND_SYSTEM, buildExpandPrompt } = await import("./prompts/discover");
+    return callAi("discover-expand", DISCOVER_EXPAND_SYSTEM, buildExpandPrompt(input.title, input.description, input.cuisine, input.cookingTime), input.title);
+  },
+
   isLive(): boolean {
     return !shouldUseMock();
   },
@@ -116,9 +146,11 @@ async function callAi(
 ): Promise<AiResponse> {
   const start = Date.now();
   const modelId = getModel("primary");
-  const tokenLimit = taskType === "recipe-generation"
+  const tokenLimit = (taskType === "recipe-generation" || taskType === "discover-generate")
     ? AI_CONFIG.maxTokensRecipeGen
-    : AI_CONFIG.maxTokens;
+    : taskType === "discover-expand"
+      ? 2048
+      : AI_CONFIG.maxTokens;
 
   // Live mode — real AI Gateway call
   if (!shouldUseMock()) {
