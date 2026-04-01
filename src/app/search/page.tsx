@@ -10,6 +10,7 @@ import {
   Loader2,
   BookOpen,
   Globe,
+  ArrowRight,
 } from "lucide-react";
 import { SearchBar } from "@/components/search/search-bar";
 import { FilterBar } from "@/components/search/filter-bar";
@@ -126,6 +127,15 @@ function SearchContent() {
               <p className="mt-2 text-sm text-muted-foreground">
                 No recipes in your collection match this search
               </p>
+              {query.trim() && (
+                <button
+                  onClick={() => router.push(`/ask?message=${encodeURIComponent(`I'm looking for ${query} recipes`)}`)}
+                  className="mt-3 inline-flex items-center gap-1.5 text-xs font-semibold text-primary hover:underline"
+                >
+                  <ChefHat className="h-3.5 w-3.5" />
+                  Ask CookGenie AI instead
+                </button>
+              )}
             </div>
           ) : null}
         </section>
@@ -227,6 +237,23 @@ function SearchContent() {
                   </button>
                 }
               />
+            )}
+
+            {/* Ask CookGenie AI — conversational fallback */}
+            {aiSearched && !aiLoading && query.trim() && (
+              <button
+                onClick={() => router.push(`/ask?message=${encodeURIComponent(`I'm looking for ${query} recipes. Can you help?`)}`)}
+                className="group mt-4 flex w-full items-center gap-3 rounded-2xl border border-dashed border-primary/30 bg-primary/5 px-4 py-3.5 text-left transition-colors hover:bg-primary/10"
+              >
+                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary/15">
+                  <ChefHat className="h-4 w-4 text-primary" />
+                </div>
+                <div className="flex-1">
+                  <p className="text-sm font-semibold text-foreground">Ask CookGenie AI</p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">Get personalized help from our AI chef</p>
+                </div>
+                <ArrowRight className="h-4 w-4 text-primary shrink-0 transition-transform group-hover:translate-x-0.5" />
+              </button>
             )}
           </section>
         )}
