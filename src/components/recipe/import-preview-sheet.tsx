@@ -97,10 +97,11 @@ export function ImportPreviewSheet({
           onImported?.(data);
         }, 1200);
       } else {
-        setError("Import failed. Please try again.");
+        const errData = await res.json().catch(() => ({}));
+        setError(errData.error ?? `Import failed (${res.status}). Please try again.`);
       }
-    } catch {
-      setError("Network error. Please try again.");
+    } catch (err) {
+      setError(`Network error: ${err instanceof Error ? err.message : "Please try again."}`);
     } finally {
       setImporting(false);
     }
