@@ -29,6 +29,21 @@ export const metadata: Metadata = {
   title: "CookGenie — Never Mess Up a Dish Again",
   description:
     "AI-powered cooking assistant that helps you find the best recipes, adapt them intelligently, and rescue you in real time.",
+  manifest: "/manifest.json",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "CookGenie",
+  },
+  icons: {
+    icon: [
+      { url: "/icons/favicon-32.png", sizes: "32x32", type: "image/png" },
+      { url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" },
+    ],
+    apple: [
+      { url: "/apple-touch-icon.png", sizes: "180x180", type: "image/png" },
+    ],
+  },
 };
 
 export const viewport: Viewport = {
@@ -37,6 +52,7 @@ export const viewport: Viewport = {
   maximumScale: 1,
   userScalable: false,
   themeColor: "#FAFAF7",
+  viewportFit: "cover",
 };
 
 export default function RootLayout({
