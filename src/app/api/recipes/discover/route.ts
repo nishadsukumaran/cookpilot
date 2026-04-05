@@ -134,16 +134,16 @@ async function handleGenerate(
       servings: raw.primary.servings ?? 4,
       tags: raw.primary.tags ?? [],
       ingredients: ((raw.primary.ingredients as Ingredient[]) ?? []).map((ing) => ({
-        name: ing.name,
-        amount: ing.amount,
-        unit: ing.unit,
+        name: String(ing.name ?? "").trim(),
+        amount: Number(ing.amount) || 1,
+        unit: String(ing.unit ?? ""),
         category: ing.category ?? "other",
       })),
-      steps: ((raw.primary.steps as CookingStep[]) ?? []).map((step) => ({
-        number: step.number,
-        instruction: step.instruction,
-        duration: step.duration,
-        tip: step.tip,
+      steps: ((raw.primary.steps as CookingStep[]) ?? []).map((step, idx) => ({
+        number: Number(step.number) || idx + 1,
+        instruction: String(step.instruction ?? ""),
+        duration: step.duration != null ? (Number(step.duration) || undefined) : undefined,
+        tip: step.tip ? String(step.tip) : undefined,
       })),
       source: "ai-generated" as const,
     } : null;

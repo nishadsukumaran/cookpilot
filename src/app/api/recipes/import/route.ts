@@ -57,29 +57,49 @@ export async function POST(req: Request) {
       ? difficulty!
       : "Medium";
 
-    // ─── Ingredient Validation ────────────────────────
-    for (const ing of ingredients) {
-      if (!ing.name?.trim()) {
-        return NextResponse.json({ error: "Each ingredient must have a name" }, { status: 400 });
-      }
-      if (typeof ing.amount !== "number" || ing.amount <= 0 || !isFinite(ing.amount)) {
-        return NextResponse.json({ error: `Invalid amount for ingredient "${ing.name}"` }, { status: 400 });
-      }
+    // ─── Coerce & Validate Ingredients ────────────────
+    // AI may return amounts/durations as strings — coerce before validating
+    const safeIngredients = ingredients
+      .filter((ing: Ingredient) => ing.name?.trim()) // drop nameless
+      .map((ing: Ingredient) => ({
+        ...ing,
+        name: String(ing.name).trim(),
+        amount: Number(ing.amount) || 1,
+        unit: String(ing.unit || "piece"),
+        category: ing.category ?? "other",
+      }));
+
+    // Deduplicate by name (AI sometimes lists the same ingredient twice)
+    const seenNames = new Set<string>();
+    const dedupedIngredients = safeIngredients.filter((ing) => {
+      const key = ing.name.toLowerCase();
+      if (seenNames.has(key)) return false;
+      seenNames.add(key);
+      return true;
+    });
+
+    if (dedupedIngredients.length === 0) {
+      return NextResponse.json({ error: "At least one valid ingredient is required" }, { status: 400 });
     }
-    if (ingredients.length > 30) {
+    if (dedupedIngredients.length > 30) {
       return NextResponse.json({ error: "Too many ingredients (max 30)" }, { status: 400 });
     }
 
-    // ─── Step Validation ──────────────────────────────
-    for (const step of steps) {
-      if (!step.instruction?.trim()) {
-        return NextResponse.json({ error: "Each step must have an instruction" }, { status: 400 });
-      }
-      if (step.duration != null && (typeof step.duration !== "number" || step.duration < 0)) {
-        return NextResponse.json({ error: `Invalid duration for step ${step.number}` }, { status: 400 });
-      }
+    // ─── Coerce & Validate Steps ──────────────────────
+    const safeSteps = steps
+      .filter((step: CookingStep) => step.instruction?.trim())
+      .map((step: CookingStep, idx: number) => ({
+        ...step,
+        number: idx + 1, // force sequential numbering to prevent duplicates
+        instruction: String(step.instruction).trim(),
+        duration: step.duration != null ? (Number(step.duration) || null) : null,
+        tip: step.tip ? String(step.tip) : null,
+      }));
+
+    if (safeSteps.length === 0) {
+      return NextResponse.json({ error: "At least one valid step is required" }, { status: 400 });
     }
-    if (steps.length > 20) {
+    if (safeSteps.length > 20) {
       return NextResponse.json({ error: "Too many steps (max 20)" }, { status: 400 });
     }
 
@@ -116,28 +136,28 @@ export async function POST(req: Request) {
       .returning({ id: schema.recipes.id, slug: schema.recipes.slug });
 
     // ─── Insert Ingredients ──────────────────────────
-    if (ingredients.length > 0) {
+    if (dedupedIngredients.length > 0) {
       await db.insert(schema.recipeIngredients).values(
-        ingredients.map((ing, idx) => ({
+        dedupedIngredients.map((ing, idx) => ({
           recipeId: recipe.id,
           name: ing.name,
           amount: String(ing.amount),
           unit: ing.unit,
-          category: ing.category ?? "other",
+          category: ing.category,
           sortOrder: idx,
         })),
       );
     }
 
     // ─── Insert Steps ────────────────────────────────
-    if (steps.length > 0) {
+    if (safeSteps.length > 0) {
       await db.insert(schema.recipeSteps).values(
-        steps.map((step) => ({
+        safeSteps.map((step) => ({
           recipeId: recipe.id,
           stepNumber: step.number,
           instruction: step.instruction,
-          duration: step.duration ?? null,
-          tip: step.tip ?? null,
+          duration: step.duration,
+          tip: step.tip,
         })),
       );
     }
