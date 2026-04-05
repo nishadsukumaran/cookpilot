@@ -97,20 +97,35 @@ export function ImportPreviewSheet({
       calories: candidate.calories ?? 0,
       tags: candidate.tags ?? [],
       ingredients: (candidate.ingredients ?? []).map((ing) => ({
-        name: ing.name,
-        amount: ing.amount,
-        unit: ing.unit,
+        name: String(ing.name || "").trim(),
+        amount: Number(ing.amount) || 1,
+        unit: String(ing.unit || "piece"),
         category: ing.category ?? "other",
       })),
-      steps: (candidate.steps ?? []).map((step) => ({
-        number: step.number,
-        instruction: step.instruction,
-        duration: step.duration ?? null,
-        tip: step.tip ?? null,
+      steps: (candidate.steps ?? []).map((step, idx) => ({
+        number: idx + 1,
+        instruction: String(step.instruction || ""),
+        duration: step.duration != null ? (Number(step.duration) || null) : null,
+        tip: step.tip ? String(step.tip) : null,
       })),
     };
 
     try {
+      // Send diagnostic payload to analytics for debugging import failures
+      fetch("/api/analytics", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          event: "import_attempt",
+          title: payload.title,
+          ingredientCount: payload.ingredients.length,
+          stepCount: payload.steps.length,
+          sampleAmount: payload.ingredients[0]?.amount,
+          sampleAmountType: typeof payload.ingredients[0]?.amount,
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+
       const res = await fetch("/api/recipes/import", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
