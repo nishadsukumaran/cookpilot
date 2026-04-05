@@ -22,13 +22,13 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
+// Accept any recipe-like object — works with both AiCandidate and PrimaryRecipe
 interface RecipeCandidate {
-  id: string;
   title: string;
   description: string;
   cuisine: string;
   cookingTime: number;
-  prepTime: number;
+  prepTime?: number;
   difficulty: string;
   servings: number;
   calories: number;
@@ -37,7 +37,7 @@ interface RecipeCandidate {
     name: string;
     amount: number;
     unit: string;
-    category: string;
+    category?: string;
   }>;
   steps: Array<{
     number: number;
@@ -45,7 +45,9 @@ interface RecipeCandidate {
     duration?: number;
     tip?: string;
   }>;
-  source: string;
+  id?: string;
+  source?: string;
+  why_match?: string;
 }
 
 interface ImportPreviewSheetProps {
@@ -69,7 +71,6 @@ export function ImportPreviewSheet({
   const [showAllSteps, setShowAllSteps] = useState(false);
 
   function handleOpenChange(isOpen: boolean) {
-    // Don't allow closing while import is in progress
     if (!isOpen && importing) return;
     onOpenChange(isOpen);
     if (!isOpen) {
@@ -83,11 +84,37 @@ export function ImportPreviewSheet({
     if (!candidate) return;
     setImporting(true);
     setError(null);
+
+    // Build a clean import payload with only the fields the API needs
+    const payload = {
+      title: candidate.title,
+      description: candidate.description ?? "",
+      cuisine: candidate.cuisine ?? "International",
+      cookingTime: candidate.cookingTime ?? 30,
+      prepTime: candidate.prepTime ?? 15,
+      difficulty: candidate.difficulty ?? "Medium",
+      servings: candidate.servings ?? 4,
+      calories: candidate.calories ?? 0,
+      tags: candidate.tags ?? [],
+      ingredients: (candidate.ingredients ?? []).map((ing) => ({
+        name: ing.name,
+        amount: ing.amount,
+        unit: ing.unit,
+        category: ing.category ?? "other",
+      })),
+      steps: (candidate.steps ?? []).map((step) => ({
+        number: step.number,
+        instruction: step.instruction,
+        duration: step.duration ?? null,
+        tip: step.tip ?? null,
+      })),
+    };
+
     try {
       const res = await fetch("/api/recipes/import", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(candidate),
+        body: JSON.stringify(payload),
       });
 
       if (res.ok) {
@@ -98,10 +125,10 @@ export function ImportPreviewSheet({
         }, 1200);
       } else {
         const errData = await res.json().catch(() => ({}));
-        setError(errData.error ?? `Import failed (${res.status}). Please try again.`);
+        setError(errData.error ?? `Import failed (${res.status})`);
       }
     } catch (err) {
-      setError(`Network error: ${err instanceof Error ? err.message : "Please try again."}`);
+      setError(`Network error: ${err instanceof Error ? err.message : "Check your connection."}`);
     } finally {
       setImporting(false);
     }
@@ -113,104 +140,113 @@ export function ImportPreviewSheet({
     ? candidate.steps
     : candidate.steps.slice(0, INITIAL_STEPS_SHOWN);
   const hiddenStepCount = candidate.steps.length - INITIAL_STEPS_SHOWN;
+  const totalTime = (candidate.prepTime ?? 0) + (candidate.cookingTime ?? 0);
 
   return (
     <Sheet open={open} onOpenChange={handleOpenChange}>
-      <SheetContent side="bottom" className="max-h-[85vh] rounded-t-3xl">
-        <SheetHeader className="text-left">
-          <SheetTitle className="font-heading text-xl">
+      <SheetContent
+        side="bottom"
+        className="max-h-[85vh] rounded-t-3xl p-0 overflow-hidden"
+        showCloseButton={false}
+      >
+        {/* Drag handle */}
+        <div className="flex justify-center pt-3 pb-1">
+          <div className="h-1 w-10 rounded-full bg-muted-foreground/20" />
+        </div>
+
+        {/* Header */}
+        <div className="px-5 pb-3">
+          <h2 className="font-heading text-xl font-semibold leading-tight">
             {candidate.title}
-          </SheetTitle>
-          <div className="flex flex-wrap items-center gap-1.5 pt-1">
-            <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
+          </h2>
+          <div className="mt-2 flex flex-wrap items-center gap-1.5">
+            <Badge variant="secondary" className="text-[10px] px-2 py-0.5">
               {candidate.cuisine}
             </Badge>
             <Badge
               variant="outline"
               className={cn(
-                "text-[10px] px-1.5 py-0",
-                candidate.difficulty === "Easy" &&
-                  "border-green-500/30 text-green-700",
-                candidate.difficulty === "Medium" &&
-                  "border-amber-500/30 text-amber-700",
-                candidate.difficulty === "Hard" &&
-                  "border-red-500/30 text-red-700"
+                "text-[10px] px-2 py-0.5",
+                candidate.difficulty === "Easy" && "border-green-500/30 text-green-700",
+                candidate.difficulty === "Medium" && "border-amber-500/30 text-amber-700",
+                candidate.difficulty === "Hard" && "border-red-500/30 text-red-700",
               )}
             >
               {candidate.difficulty}
             </Badge>
-            <Badge className="bg-purple-500/15 text-purple-700 border-purple-500/20 text-[10px] px-1.5 py-0">
+            <Badge className="bg-purple-500/15 text-purple-700 border-purple-500/20 text-[10px] px-2 py-0.5">
               <Globe className="mr-0.5 h-2.5 w-2.5" />
-              AI Generated
+              AI
             </Badge>
           </div>
-        </SheetHeader>
+        </div>
 
-        <div className="mt-4 space-y-5 overflow-y-auto pb-24">
+        {/* Scrollable content */}
+        <div className="overflow-y-auto px-5 pb-28" style={{ maxHeight: "calc(85vh - 160px)" }}>
           {/* Description */}
-          <p className="text-xs leading-relaxed text-muted-foreground">
+          <p className="text-sm leading-relaxed text-muted-foreground">
             {candidate.description}
           </p>
 
           {/* Stats row */}
-          <div className="flex flex-wrap gap-2">
-            <StatPill
-              icon={<Clock className="h-3 w-3" />}
-              label={`${candidate.prepTime + candidate.cookingTime} min`}
-            />
-            <StatPill
-              icon={<Users className="h-3 w-3" />}
-              label={`${candidate.servings} servings`}
-            />
-            <StatPill
-              icon={<Flame className="h-3 w-3" />}
-              label={`${candidate.calories} cal`}
-            />
+          <div className="mt-4 flex flex-wrap gap-2">
+            <StatPill icon={<Clock className="h-3.5 w-3.5" />} label={`${totalTime} min`} />
+            <StatPill icon={<Users className="h-3.5 w-3.5" />} label={`${candidate.servings} servings`} />
+            <StatPill icon={<Flame className="h-3.5 w-3.5" />} label={`${candidate.calories} cal`} />
           </div>
 
           {/* Tags */}
           {candidate.tags.length > 0 && (
-            <div className="flex flex-wrap gap-1">
+            <div className="mt-3 flex flex-wrap gap-1.5">
               {candidate.tags.map((tag) => (
-                <Badge
+                <span
                   key={tag}
-                  variant="secondary"
-                  className="text-[10px] px-1.5 py-0 font-normal"
+                  className="rounded-full bg-muted px-2.5 py-0.5 text-[10px] font-medium text-muted-foreground"
                 >
                   {tag}
-                </Badge>
+                </span>
               ))}
             </div>
           )}
 
+          {/* Divider */}
+          <div className="my-5 border-t border-border" />
+
           {/* Ingredients */}
           <div>
-            <h3 className="flex items-center gap-1.5 text-sm font-semibold">
+            <h3 className="flex items-center gap-2 text-sm font-semibold text-foreground">
               <ChefHat className="h-4 w-4 text-primary" />
               Ingredients
               <span className="text-xs font-normal text-muted-foreground">
                 ({candidate.ingredients.length})
               </span>
             </h3>
-            <ul className="mt-2 space-y-1.5">
-              {candidate.ingredients.map((ing) => (
-                <li
-                  key={`${ing.name}-${ing.category}`}
-                  className="flex items-center justify-between text-xs"
-                >
-                  <span className="text-foreground">{ing.name}</span>
-                  <span className="text-muted-foreground tabular-nums">
-                    {ing.amount} {ing.unit}
-                  </span>
-                </li>
-              ))}
-            </ul>
+            <div className="mt-3 rounded-xl border border-border bg-card p-3">
+              <ul className="space-y-2">
+                {candidate.ingredients.map((ing, i) => (
+                  <li
+                    key={`${ing.name}-${i}`}
+                    className="flex items-center justify-between"
+                  >
+                    <span className="text-sm text-foreground">{ing.name}</span>
+                    <span className="text-sm font-medium text-muted-foreground tabular-nums">
+                      {ing.amount} {ing.unit}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
           </div>
+
+          {/* Divider */}
+          <div className="my-5 border-t border-border" />
 
           {/* Steps */}
           <div>
-            <h3 className="text-sm font-semibold">Steps</h3>
-            <ol className="mt-2 space-y-3">
+            <h3 className="text-sm font-semibold text-foreground">
+              Steps ({candidate.steps.length})
+            </h3>
+            <ol className="mt-3 space-y-4">
               <AnimatePresence initial={false}>
                 {visibleSteps.map((step) => (
                   <motion.li
@@ -220,15 +256,21 @@ export function ImportPreviewSheet({
                     exit={{ opacity: 0, height: 0 }}
                     className="flex gap-3"
                   >
-                    <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/10 text-[10px] font-bold text-primary">
+                    <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-bold text-primary">
                       {step.number}
                     </span>
-                    <div className="flex-1">
-                      <p className="text-xs leading-relaxed text-foreground">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm leading-relaxed text-foreground">
                         {step.instruction}
                       </p>
+                      {step.duration && (
+                        <span className="mt-1 inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+                          <Clock className="h-3 w-3" />
+                          {step.duration} min
+                        </span>
+                      )}
                       {step.tip && (
-                        <p className="mt-1 text-[11px] italic text-muted-foreground">
+                        <p className="mt-1 text-xs italic text-muted-foreground">
                           Tip: {step.tip}
                         </p>
                       )}
@@ -242,7 +284,7 @@ export function ImportPreviewSheet({
               <button
                 type="button"
                 onClick={() => setShowAllSteps(true)}
-                className="mt-3 flex items-center gap-1 text-xs font-medium text-primary hover:text-primary/80 transition-colors"
+                className="mt-3 flex items-center gap-1.5 text-xs font-medium text-primary hover:text-primary/80 transition-colors"
               >
                 <ChevronDown className="h-3.5 w-3.5" />
                 Show all {candidate.steps.length} steps
@@ -252,14 +294,14 @@ export function ImportPreviewSheet({
         </div>
 
         {/* Fixed bottom import button */}
-        <div className="absolute inset-x-0 bottom-0 border-t border-border bg-popover p-4">
+        <div className="absolute inset-x-0 bottom-0 border-t border-border bg-popover px-5 py-4 safe-area-bottom">
           {error && (
-            <p className="mb-2 text-center text-xs text-red-600">{error}</p>
+            <p className="mb-2.5 text-center text-xs text-red-600 leading-relaxed">{error}</p>
           )}
           <Button
             onClick={handleImport}
             disabled={importing || imported}
-            className="w-full h-11 rounded-2xl font-semibold"
+            className="w-full h-12 rounded-2xl font-semibold text-base"
           >
             {imported ? (
               <>
@@ -279,15 +321,9 @@ export function ImportPreviewSheet({
   );
 }
 
-function StatPill({
-  icon,
-  label,
-}: {
-  icon: React.ReactNode;
-  label: string;
-}) {
+function StatPill({ icon, label }: { icon: React.ReactNode; label: string }) {
   return (
-    <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2.5 py-1 text-[11px] font-medium text-muted-foreground">
+    <span className="inline-flex items-center gap-1.5 rounded-full bg-muted px-3 py-1.5 text-xs font-medium text-muted-foreground">
       {icon}
       {label}
     </span>
