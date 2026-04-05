@@ -28,10 +28,14 @@ interface DiscoveryResultCardProps {
   primary: PrimaryRecipe | null;
   alternatives: AlternativeRecipe[];
   followups: string[];
+  recipes: PrimaryRecipe[];
+  queryMode: "specific" | "broad";
+  onLoadMore?: () => void;
+  isLoadingMore?: boolean;
   expandedAlternatives: Map<number, ExpandedData>;
   expandingIndex: number | null;
   onExpandAlternative: (index: number) => void;
-  onImportPrimary: () => void;
+  onImportPrimary: (recipe?: PrimaryRecipe) => void;
   onImportAlternative: (index: number) => void;
   onFollowup: (text: string) => void;
   className?: string;
@@ -42,6 +46,10 @@ export function DiscoveryResultCard({
   primary,
   alternatives,
   followups,
+  recipes,
+  queryMode,
+  onLoadMore,
+  isLoadingMore,
   expandedAlternatives,
   expandingIndex,
   onExpandAlternative,
@@ -51,6 +59,122 @@ export function DiscoveryResultCard({
   className,
 }: DiscoveryResultCardProps) {
   const [showAlternatives, setShowAlternatives] = useState(false);
+
+  // Broad mode: multiple full recipe cards
+  if (queryMode === "broad" && recipes.length > 0) {
+    return (
+      <div className={cn("space-y-4", className)}>
+        {/* Intent banner */}
+        {intent && (
+          <motion.div
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="flex items-center gap-2 rounded-xl bg-purple-500/8 border border-purple-500/15 px-3.5 py-2.5"
+          >
+            <ChefHat className="h-4 w-4 text-purple-600 dark:text-purple-400 shrink-0" />
+            <p className="text-xs text-foreground">
+              <span className="font-semibold text-purple-600 dark:text-purple-400">Found {recipes.length} recipes </span>
+              for &ldquo;{intent}&rdquo;
+            </p>
+          </motion.div>
+        )}
+
+        {/* Recipe cards */}
+        {recipes.map((recipe, idx) => (
+          <motion.div
+            key={recipe.id}
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: idx * 0.1 }}
+            className="rounded-2xl border border-border bg-card shadow-card overflow-hidden"
+          >
+            <div className="p-4">
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex-1 min-w-0">
+                  <h3 className="font-heading text-base font-semibold leading-tight">{recipe.title}</h3>
+                  <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                    <Badge variant="secondary" className="text-[10px] px-2 py-0.5">{recipe.cuisine}</Badge>
+                    <Badge variant="outline" className={cn(
+                      "text-[10px] px-2 py-0.5",
+                      recipe.difficulty === "Easy" && "border-green-500/30 text-green-700 dark:text-green-400",
+                      recipe.difficulty === "Medium" && "border-amber-500/30 text-amber-700 dark:text-amber-400",
+                      recipe.difficulty === "Hard" && "border-red-500/30 text-red-700 dark:text-red-400",
+                    )}>{recipe.difficulty}</Badge>
+                  </div>
+                </div>
+                <span className="shrink-0 flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 text-xs font-bold text-primary">
+                  {idx + 1}
+                </span>
+              </div>
+
+              <p className="mt-2 text-sm leading-relaxed text-muted-foreground line-clamp-2">{recipe.description}</p>
+
+              {recipe.why_match && (
+                <p className="mt-2 text-xs text-primary font-medium">{recipe.why_match}</p>
+              )}
+
+              <div className="mt-3 flex flex-wrap gap-1.5">
+                <StatPill icon={<Clock className="h-3 w-3" />} value={`${(recipe.prepTime || 0) + recipe.cookingTime} min`} />
+                <StatPill icon={<Users className="h-3 w-3" />} value={`${recipe.servings} servings`} />
+                <StatPill icon={<Flame className="h-3 w-3" />} value={`${recipe.calories} cal`} />
+              </div>
+
+              <Button
+                onClick={() => onImportPrimary(recipe)}
+                className="mt-3 w-full h-10 rounded-xl font-semibold text-sm"
+                variant="outline"
+                data-recipe-index={idx}
+              >
+                Preview & Import
+              </Button>
+            </div>
+          </motion.div>
+        ))}
+
+        {/* Load more button */}
+        {onLoadMore && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.3 }}
+          >
+            <button
+              onClick={onLoadMore}
+              disabled={isLoadingMore}
+              className="flex w-full items-center justify-center gap-2 rounded-2xl border border-dashed border-purple-500/30 bg-purple-500/5 px-4 py-3.5 text-sm font-medium text-foreground transition-colors hover:bg-purple-500/10 disabled:opacity-50"
+            >
+              {isLoadingMore ? (
+                <><Loader2 className="h-4 w-4 animate-spin text-purple-500" /> Finding more recipes...</>
+              ) : (
+                <><Sparkles className="h-4 w-4 text-purple-500" /> Discover more recipes</>
+              )}
+            </button>
+          </motion.div>
+        )}
+
+        {/* Followup chips */}
+        {followups.length > 0 && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.4 }}
+            className="flex flex-wrap gap-2"
+          >
+            {followups.map((f) => (
+              <button
+                key={f}
+                onClick={() => onFollowup(f)}
+                className="flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground hover:border-primary/20"
+              >
+                {f}
+                <ArrowRight className="h-3 w-3" />
+              </button>
+            ))}
+          </motion.div>
+        )}
+      </div>
+    );
+  }
 
   if (!primary) return null;
 
@@ -136,7 +260,7 @@ export function DiscoveryResultCard({
 
           {/* Import button */}
           <Button
-            onClick={onImportPrimary}
+            onClick={() => onImportPrimary(primary!)}
             className="mt-4 w-full h-11 rounded-2xl font-semibold"
           >
             Preview & Import

@@ -218,17 +218,21 @@ function SearchContent() {
             )}
 
             {/* Complete — show results */}
-            {discovery.phase === "complete" && discovery.primary && (
+            {discovery.phase === "complete" && (discovery.primary || discovery.recipes.length > 0) && (
               <DiscoveryResultCard
                 intent={discovery.intent}
                 primary={discovery.primary}
                 alternatives={discovery.alternatives}
                 followups={discovery.followups}
+                recipes={discovery.recipes}
+                queryMode={discovery.queryMode}
+                onLoadMore={discovery.queryMode === "broad" ? discovery.loadMore : undefined}
+                isLoadingMore={discovery.loadingMore}
                 expandedAlternatives={discovery.expandedAlternatives}
                 expandingIndex={discovery.expandingIndex}
                 onExpandAlternative={discovery.expandAlternative}
-                onImportPrimary={() => {
-                  setPreviewCandidate(discovery.primary);
+                onImportPrimary={(recipe) => {
+                  setPreviewCandidate(recipe ?? discovery.primary);
                 }}
                 onImportAlternative={(idx) => {
                   const expanded = discovery.expandedAlternatives.get(idx);

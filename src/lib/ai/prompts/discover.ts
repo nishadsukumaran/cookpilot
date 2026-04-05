@@ -43,10 +43,15 @@ When in doubt, do NOT ask for clarification. Just pick the best interpretation.
 Return ONLY this JSON:
 {
   "intent": "primary intent category",
+  "queryMode": "specific" or "broad",
   "expansions": ["interpretation 1", "interpretation 2", "interpretation 3"],
   "needsClarification": true or false,
   "clarification": "short question" or null
-}`;
+}
+
+queryMode rules:
+- "specific": user named a specific dish or recipe (e.g., "butter chicken", "pasta carbonara", "shakshuka")
+- "broad": user described a goal, cuisine, ingredient, or category without naming a dish (e.g., "healthy", "quick dinner", "something with chicken", "Indian food", "comfort food")`;
 
 export function buildUnderstandPrompt(
   query: string,
@@ -124,14 +129,56 @@ Return this exact JSON structure:
   "followups": ["Make it less spicy", "Show a vegetarian version", "Start cooking"]
 }`;
 
+export const DISCOVER_GENERATE_BROAD_SYSTEM = `You are CookGenie, an expert chef creating personalized recipe recommendations.
+You MUST respond with ONLY valid JSON — no markdown, no code fences, no explanation text.
+
+The user has a BROAD request (not a specific dish). Generate 3 FULL recipe options, each meaningfully different.
+
+Each recipe MUST include:
+- 8-16 ingredients with realistic amounts and common units (g, ml, tsp, tbsp, cup, pieces, cloves)
+- 5-8 actionable cooking steps with durations
+- Accurate calorie estimate per serving
+- A "why_match" field explaining what makes THIS recipe a good fit (1-2 sentences)
+
+The 3 recipes should offer genuine variety:
+- Different dishes (not just variations of the same thing)
+- Mix of cooking techniques when possible
+- Range of effort levels if applicable
+
+Also generate exactly 3 followup suggestions to narrow or explore further.
+
+Return this exact JSON structure:
+{
+  "recipes": [
+    {
+      "title": "Recipe Name",
+      "description": "2-3 sentence description",
+      "why_match": "Why this fits what you're looking for",
+      "cuisine": "Indian|Arabic|Middle Eastern|Italian|Thai|Mexican|Japanese|Chinese|International",
+      "cookingTime": 30,
+      "prepTime": 15,
+      "difficulty": "Easy|Medium|Hard",
+      "calories": 400,
+      "servings": 4,
+      "tags": ["tag1", "tag2"],
+      "ingredients": [{"name": "Ingredient", "amount": 200, "unit": "g", "category": "protein|dairy|spice|vegetable|grain|oil|other"}],
+      "steps": [{"number": 1, "instruction": "Step text", "duration": 5, "tip": "Optional tip"}]
+    }
+  ],
+  "followups": ["Show vegetarian only", "Under 300 calories", "Quick under 20 min"]
+}`;
+
 export function buildGeneratePrompt(
   query: string,
   resolvedIntent: string | null,
+  queryMode: "specific" | "broad",
   preferences?: { spicePreference?: string; dietary?: string[]; cuisines?: string[] },
   filters?: SearchFilters,
 ): string {
   const effectiveQuery = resolvedIntent ?? query;
-  let prompt = `Find the best recipe for: "${effectiveQuery}"`;
+  let prompt = queryMode === "broad"
+    ? `Find 3 different recipes for: "${effectiveQuery}"`
+    : `Find the best recipe for: "${effectiveQuery}"`;
 
   if (resolvedIntent && resolvedIntent !== query) {
     prompt += `\n(User originally searched: "${query}", then clarified they want: "${resolvedIntent}")`;

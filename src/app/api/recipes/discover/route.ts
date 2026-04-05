@@ -10,6 +10,7 @@ const DEV_USER = "dev-user";
 interface DiscoverRequest {
   query: string;
   phase: "understand" | "generate";
+  queryMode?: string;
   preferences?: {
     spicePreference?: string;
     dietary?: string[];
@@ -31,7 +32,7 @@ export async function POST(req: Request) {
     if (phase === "understand") {
       return handleUnderstand(query, preferences, filters);
     } else if (phase === "generate") {
-      return handleGenerate(query, resolvedIntent ?? null, preferences, filters);
+      return handleGenerate(query, resolvedIntent ?? null, body.queryMode ?? "specific", preferences, filters);
     } else {
       return NextResponse.json({ error: "phase must be 'understand' or 'generate'" }, { status: 400 });
     }
@@ -59,7 +60,7 @@ async function handleUnderstand(
   }).catch(() => {});
 
   // Parse JSON response
-  let parsed: { intent: string; expansions: string[]; needsClarification: boolean; clarification: string | null };
+  let parsed: { intent: string; queryMode: string; expansions: string[]; needsClarification: boolean; clarification: string | null };
   try {
     let jsonStr = aiResult.content.trim();
     const fenceMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
@@ -69,6 +70,7 @@ async function handleUnderstand(
     // Fallback if AI returns unparseable response
     parsed = {
       intent: "dish_search",
+      queryMode: "specific",
       expansions: [query],
       needsClarification: false,
       clarification: null,
@@ -87,6 +89,7 @@ async function handleUnderstand(
   return NextResponse.json({
     phase: "understand",
     intent: parsed.intent ?? "dish_search",
+    queryMode: parsed.queryMode ?? "specific",
     expansions: parsed.expansions ?? [query],
     needsClarification: parsed.needsClarification ?? false,
     clarification: parsed.clarification ?? null,
@@ -97,10 +100,11 @@ async function handleUnderstand(
 async function handleGenerate(
   query: string,
   resolvedIntent: string | null,
+  queryMode: string,
   preferences?: DiscoverRequest["preferences"],
   filters?: SearchFilters,
 ) {
-  const aiResult = await ai.discoverGenerate({ query, resolvedIntent, preferences, filters });
+  const aiResult = await ai.discoverGenerate({ query, resolvedIntent, queryMode: queryMode as "specific" | "broad", preferences, filters });
 
   logAiInteraction({
     userId: DEV_USER,
@@ -119,6 +123,63 @@ async function handleGenerate(
     if (fenceMatch) jsonStr = fenceMatch[1].trim();
 
     const raw = JSON.parse(jsonStr);
+    const trace = createTrace();
+
+    // Broad mode: multiple full recipes
+    if (queryMode === "broad" && raw.recipes) {
+      const recipes = (raw.recipes as Array<Record<string, unknown>>).map((r) => ({
+        id: crypto.randomUUID(),
+        title: (r.title as string) ?? "Untitled Recipe",
+        description: (r.description as string) ?? "",
+        why_match: (r.why_match as string) ?? "",
+        cuisine: (r.cuisine as string) ?? "International",
+        cookingTime: Number(r.cookingTime) || 30,
+        prepTime: Number(r.prepTime) || 15,
+        difficulty: (r.difficulty as string) ?? "Medium",
+        calories: Number(r.calories) || 0,
+        servings: Number(r.servings) || 4,
+        tags: (r.tags as string[]) ?? [],
+        ingredients: ((r.ingredients as Ingredient[]) ?? []).map((ing) => ({
+          name: String(ing.name ?? "").trim(),
+          amount: Number(ing.amount) || 1,
+          unit: String(ing.unit ?? ""),
+          category: ing.category ?? "other",
+        })),
+        steps: ((r.steps as CookingStep[]) ?? []).map((step, idx) => ({
+          number: Number(step.number) || idx + 1,
+          instruction: String(step.instruction ?? ""),
+          duration: step.duration != null ? (Number(step.duration) || undefined) : undefined,
+          tip: step.tip ? String(step.tip) : undefined,
+        })),
+        source: "ai-generated" as const,
+      }));
+
+      // Filter out recipes with no ingredients or steps
+      const validRecipes = recipes.filter((r) => r.ingredients.length > 0 && r.steps.length > 0);
+
+      const followups = (raw.followups as string[]) ?? [
+        "Show me different options",
+        "Make it healthier",
+        "Quick under 20 min",
+      ];
+
+      trace.addStage("ai-call", `discover-generate-broad`, aiResult.latencyMs, {
+        model: aiResult.model,
+        wasMock: aiResult.wasMock,
+        recipeCount: validRecipes.length,
+      });
+
+      return NextResponse.json({
+        phase: "generate",
+        queryMode: "broad",
+        intent: resolvedIntent ?? query,
+        recipes: validRecipes,
+        primary: null,
+        alternatives: [],
+        followups,
+        ...(isDev() ? { _trace: trace.finish({ structured: false, ai: true, mock: aiResult.wasMock }) } : {}),
+      });
+    }
 
     // Shape the primary recipe
     const primary = raw.primary ? {
@@ -180,7 +241,6 @@ async function handleGenerate(
       });
     }
 
-    const trace = createTrace();
     trace.addStage("ai-call", `discover-generate`, aiResult.latencyMs, {
       model: aiResult.model,
       wasMock: aiResult.wasMock,
@@ -191,6 +251,7 @@ async function handleGenerate(
 
     return NextResponse.json({
       phase: "generate",
+      queryMode: "specific",
       intent: resolvedIntent ?? query,
       primary,
       alternatives,

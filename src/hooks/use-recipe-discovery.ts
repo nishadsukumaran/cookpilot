@@ -55,11 +55,13 @@ export interface UseRecipeDiscoveryReturn {
   selectClarification: (choice: string) => void;
   skipClarification: () => void;
   expandAlternative: (index: number) => void;
+  loadMore: () => void;
   reset: () => void;
 
   // State
   phase: DiscoveryPhase;
   query: string;
+  loadingMore: boolean;
 
   // Phase 1 results
   intent: string | null;
@@ -70,6 +72,8 @@ export interface UseRecipeDiscoveryReturn {
   primary: PrimaryRecipe | null;
   alternatives: AlternativeRecipe[];
   followups: string[];
+  recipes: PrimaryRecipe[];
+  queryMode: "specific" | "broad";
 
   // Alternative expansion
   expandedAlternatives: Map<number, ExpandedData>;
@@ -92,6 +96,9 @@ export function useRecipeDiscovery(): UseRecipeDiscoveryReturn {
   const [primary, setPrimary] = useState<PrimaryRecipe | null>(null);
   const [alternatives, setAlternatives] = useState<AlternativeRecipe[]>([]);
   const [followups, setFollowups] = useState<string[]>([]);
+  const [recipes, setRecipes] = useState<PrimaryRecipe[]>([]);
+  const [queryMode, setQueryMode] = useState<"specific" | "broad">("specific");
+  const [loadingMore, setLoadingMore] = useState(false);
 
   // Expansion
   const [expandedAlternatives, setExpandedAlternatives] = useState<Map<number, ExpandedData>>(new Map());
@@ -103,7 +110,7 @@ export function useRecipeDiscovery(): UseRecipeDiscoveryReturn {
   // Stored filters for phase 2
   const [storedFilters, setStoredFilters] = useState<SearchFilters | undefined>();
 
-  const runPhase2 = useCallback(async (q: string, resolved: string | null, filters?: SearchFilters) => {
+  const runPhase2 = useCallback(async (q: string, resolved: string | null, mode: "specific" | "broad", filters?: SearchFilters) => {
     setPhase("generating");
     try {
       const res = await fetch("/api/recipes/discover", {
@@ -112,6 +119,7 @@ export function useRecipeDiscovery(): UseRecipeDiscoveryReturn {
         body: JSON.stringify({
           query: q,
           phase: "generate",
+          queryMode: mode,
           resolvedIntent: resolved,
           filters,
         }),
@@ -119,13 +127,17 @@ export function useRecipeDiscovery(): UseRecipeDiscoveryReturn {
       if (!res.ok) throw new Error("Generate failed");
       const data = await res.json();
 
-      if (data.error || !data.primary) {
+      if (data.queryMode === "broad" && data.recipes?.length > 0) {
+        setRecipes(data.recipes);
+        setPrimary(null);
+      } else if (data.primary) {
+        setPrimary(data.primary);
+        setRecipes([]);
+      } else {
         setError(data.error ?? "No recipes found");
         setPhase("error");
         return;
       }
-
-      setPrimary(data.primary);
       setAlternatives(data.alternatives ?? []);
       setFollowups(data.followups ?? []);
       setPhase("complete");
@@ -146,6 +158,9 @@ export function useRecipeDiscovery(): UseRecipeDiscoveryReturn {
     setPrimary(null);
     setAlternatives([]);
     setFollowups([]);
+    setRecipes([]);
+    setQueryMode("specific");
+    setLoadingMore(false);
     setExpandedAlternatives(new Map());
     setExpandingIndex(null);
     setError(null);
@@ -165,6 +180,7 @@ export function useRecipeDiscovery(): UseRecipeDiscoveryReturn {
       })
       .then((data) => {
         setIntent(data.intent ?? "dish_search");
+        setQueryMode(data.queryMode === "broad" ? "broad" : "specific");
         setExpansions(data.expansions ?? []);
 
         if (data.needsClarification && data.clarification) {
@@ -174,7 +190,7 @@ export function useRecipeDiscovery(): UseRecipeDiscoveryReturn {
         } else {
           trackDiscoveryEvent("auto_generate", { query: q, intent: data.intent });
           // Auto-proceed to phase 2
-          runPhase2(q, null, filters);
+          runPhase2(q, null, data.queryMode === "broad" ? "broad" : "specific", filters);
         }
       })
       .catch(() => {
@@ -186,13 +202,13 @@ export function useRecipeDiscovery(): UseRecipeDiscoveryReturn {
 
   const selectClarification = useCallback((choice: string) => {
     trackDiscoveryEvent("clarification_selected", { query, choice });
-    runPhase2(query, choice, storedFilters);
-  }, [query, storedFilters, runPhase2]);
+    runPhase2(query, choice, queryMode, storedFilters);
+  }, [query, queryMode, storedFilters, runPhase2]);
 
   const skipClarification = useCallback(() => {
     trackDiscoveryEvent("clarification_skipped", { query });
-    runPhase2(query, null, storedFilters);
-  }, [query, storedFilters, runPhase2]);
+    runPhase2(query, null, queryMode, storedFilters);
+  }, [query, queryMode, storedFilters, runPhase2]);
 
   const expandAlternative = useCallback(async (index: number) => {
     if (expandedAlternatives.has(index) || expandingIndex !== null) return;
@@ -233,6 +249,39 @@ export function useRecipeDiscovery(): UseRecipeDiscoveryReturn {
     }
   }, [alternatives, expandedAlternatives, expandingIndex]);
 
+  const loadMore = useCallback(async () => {
+    if (loadingMore || phase !== "complete" || queryMode !== "broad") return;
+
+    const existingTitles = recipes.map((r) => r.title);
+    setLoadingMore(true);
+
+    try {
+      const res = await fetch("/api/recipes/discover", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          query,
+          phase: "generate",
+          queryMode: "broad",
+          resolvedIntent: `More options for: ${query}. Exclude these already shown: ${existingTitles.join(", ")}`,
+          filters: storedFilters,
+        }),
+      });
+      if (!res.ok) throw new Error("Load more failed");
+      const data = await res.json();
+
+      if (data.recipes?.length > 0) {
+        setRecipes((prev) => [...prev, ...data.recipes]);
+        setFollowups(data.followups ?? []);
+      }
+      trackDiscoveryEvent("load_more_complete", { query, newCount: data.recipes?.length ?? 0, totalCount: recipes.length + (data.recipes?.length ?? 0) });
+    } catch {
+      // Silently fail — user can retry
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [loadingMore, phase, queryMode, query, recipes, storedFilters]);
+
   const reset = useCallback(() => {
     setPhase("idle");
     setQuery("");
@@ -242,6 +291,9 @@ export function useRecipeDiscovery(): UseRecipeDiscoveryReturn {
     setPrimary(null);
     setAlternatives([]);
     setFollowups([]);
+    setRecipes([]);
+    setQueryMode("specific");
+    setLoadingMore(false);
     setExpandedAlternatives(new Map());
     setExpandingIndex(null);
     setError(null);
@@ -249,10 +301,10 @@ export function useRecipeDiscovery(): UseRecipeDiscoveryReturn {
   }, []);
 
   return {
-    discover, selectClarification, skipClarification, expandAlternative, reset,
-    phase, query,
+    discover, selectClarification, skipClarification, expandAlternative, loadMore, reset,
+    phase, query, loadingMore,
     intent, expansions, clarification,
-    primary, alternatives, followups,
+    primary, alternatives, followups, recipes, queryMode,
     expandedAlternatives, expandingIndex,
     error,
   };

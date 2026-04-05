@@ -114,11 +114,14 @@ export const ai = {
   async discoverGenerate(input: {
     query: string;
     resolvedIntent: string | null;
+    queryMode?: "specific" | "broad";
     preferences?: { spicePreference?: string; dietary?: string[]; cuisines?: string[] };
     filters?: SearchFilters;
   }): Promise<AiResponse> {
-    const { DISCOVER_GENERATE_SYSTEM, buildGeneratePrompt } = await import("./prompts/discover");
-    return callAi("discover-generate", DISCOVER_GENERATE_SYSTEM, buildGeneratePrompt(input.query, input.resolvedIntent, input.preferences, input.filters), input.query);
+    const { DISCOVER_GENERATE_SYSTEM, DISCOVER_GENERATE_BROAD_SYSTEM, buildGeneratePrompt } = await import("./prompts/discover");
+    const mode = input.queryMode ?? "specific";
+    const systemPrompt = mode === "broad" ? DISCOVER_GENERATE_BROAD_SYSTEM : DISCOVER_GENERATE_SYSTEM;
+    return callAi("discover-generate", systemPrompt, buildGeneratePrompt(input.query, input.resolvedIntent, mode, input.preferences, input.filters), input.query);
   },
 
   async discoverExpand(input: {
